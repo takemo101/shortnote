@@ -938,13 +938,20 @@ if let why = keyGuard(pid, app) {
         let mid = darkAt(210, 150), cornerA = darkAt(300, 100), cornerB = darkAt(120, 200)
         rec(lineIds[1], (mid == true && cornerA == false && cornerB == false) ? "pass" : "fail", "dark at the midpoint (210,150)=\(String(describing: mid)); at the empty corners (300,100)=\(String(describing: cornerA)), (120,200)=\(String(describing: cornerB))")
 
+        // 対照：ペンのクリックは、点を足す（クリックが届くこと、Cmd+Z で消えることの確認）。届いていなければ、以下の「足されない」は、何も見ていないことになる。
+        let penClick = selectTool(0) && click(pt(50, 250))
+        let dotThere = darkAt(50, 250)
+        key(6, .maskCommand)
+        let dotGone = darkAt(50, 250)
+        let control = penClick && dotThere == true && dotGone == false
         // 大きさのないドラッグ（クリック）。線が足されていれば、Cmd+Z で消えるのは、クリックの分で、本物の線が残る。
-        let clicked = click(pt(50, 250))
+        let clicked = selectTool(5) && click(pt(50, 250))
+        let nothingDrawn = darkAt(50, 250)
         key(6, .maskCommand)
         let afterUndo = darkAt(210, 150)
         key(6, [.maskCommand, .maskShift])
         let afterRedo = darkAt(210, 150)
-        rec(lineIds[2], (clicked && afterUndo == false && afterRedo == true) ? "pass" : "fail", "click=\(clicked); after Cmd+Z the line is gone=\(String(describing: afterUndo.map { !$0 })); after Cmd+Shift+Z it is back=\(String(describing: afterRedo))")
+        rec(lineIds[2], (control && clicked && nothingDrawn == false && afterUndo == false && afterRedo == true) ? "pass" : "fail", "control (pen click): dot there=\(String(describing: dotThere)), gone after Cmd+Z=\(String(describing: dotGone.map { !$0 })); line-tool click delivered=\(clicked), nothing drawn at the click=\(String(describing: nothingDrawn.map { !$0 })); after Cmd+Z the line is gone=\(String(describing: afterUndo.map { !$0 })); after Cmd+Shift+Z it is back=\(String(describing: afterRedo))")
 
         // 移動：中点を 60 pt 下へ。線は (120,160)〜(300,260) になる。
         if selectTool(4), drag(line(pt(210, 150), pt(210, 210)), pid: pid) {
