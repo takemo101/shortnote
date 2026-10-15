@@ -460,6 +460,32 @@ if let aw = axWindow(), let c0 = canvasFrame(), let w0 = axSize(aw) {
     setAXSize(aw, w0.width, w0.height); _ = waitCanvas({ abs($0.width - c0.width) < 2 }); canvasWidthPt = 480
 } else { rec("Z1-Z4 window resize / maximize", "blocked", "could not read the window or canvas through Accessibility") }
 
+// ---- 実際のマウスで、ウィンドウの角をドラッグして大きさを変える（A12）。AX でサイズを設定する Z1〜Z4 とは別の経路（枠のドラッグ）----
+// 掴むのは、自分のウィンドウの右下の角の内側（mouseDown が自分のウィンドウに入ることを確かめる）。ドラッグの間は、ボタンを押した窓にイベントが届くので、動かす先の画面の位置は確かめない。
+func cornerDrag(_ from: CGPoint, _ to: CGPoint) -> Bool {
+    guard hitOwner(from) == pid else { print("   guard refused corner mouseDown at \(from): front-most owner=\(String(describing: hitOwner(from))) want \(pid)"); return false }
+    post(.mouseMoved, from); post(.leftMouseDown, from)
+    for p in line(from, to, steps: 30).dropFirst() { post(.leftMouseDragged, p) }
+    post(.leftMouseUp, to); usleep(400_000)
+    return true
+}
+let resizeIds = ["Z5 dragging the window's bottom-right corner with the real mouse grows the canvas", "Z6 dragging the corner back shrinks the canvas to its previous size"]
+if let c0 = canvasFrame(), let wb0 = candWindow(pid).map({ bounds($0) }) {
+    let grab = CGPoint(x: wb0.maxX - 3, y: wb0.maxY - 3)
+    if cornerDrag(grab, CGPoint(x: grab.x + 120, y: grab.y + 80)) {
+        let grown = waitCanvas { $0.width > c0.width + 60 && $0.height > c0.height + 40 }
+        let wb1 = candWindow(pid).map { bounds($0) } ?? .zero
+        rec(resizeIds[0], grown != nil ? "pass" : "fail", "window \(Int(wb0.width))x\(Int(wb0.height)) -> \(Int(wb1.width))x\(Int(wb1.height)); canvas \(Int(c0.width))x\(Int(c0.height)) -> \(grown.map { "\(Int($0.width))x\(Int($0.height))" } ?? (canvasFrame().map { "\(Int($0.width))x\(Int($0.height))" } ?? "unavailable")) (a drag of +120,+80 pt from the corner at \(Int(grab.x)),\(Int(grab.y)))")
+        if grown != nil {
+            let grab2 = CGPoint(x: wb1.maxX - 3, y: wb1.maxY - 3)
+            if cornerDrag(grab2, CGPoint(x: grab2.x - 120, y: grab2.y - 80)) {
+                let back = waitCanvas { abs($0.width - c0.width) < 4 && abs($0.height - c0.height) < 4 }
+                rec(resizeIds[1], back != nil ? "pass" : "fail", "canvas after dragging back: \(canvasFrame().map { "\(Int($0.width))x\(Int($0.height))" } ?? "unavailable") (expect about \(Int(c0.width))x\(Int(c0.height)))")
+            } else { rec(resizeIds[1], "blocked", "the corner mouseDown guard refused") }
+        } else { rec(resizeIds[1], "blocked", "depends on Z5") }
+    } else { rec(resizeIds[0], "blocked", "the corner mouseDown guard refused"); rec(resizeIds[1], "blocked", "depends on Z5") }
+} else { for id in resizeIds { rec(id, "blocked", "could not read the canvas or the window bounds") } }
+
 func isCanvas(_ w: Double, _ h: Double) -> (CGRect) -> Bool { { abs($0.width - w) < 1 && abs($0.height - h) < 1 } }
 // ---- キャンバスサイズの設定（A13）：メニューバーのメニュー・保存・書き出しのピクセル数 ----
 func statusMenuBar() -> AXUIElement? { (ax(app, "AXExtrasMenuBar") ?? ax(app, "AXMenuBar")).map { $0 as! AXUIElement } }
