@@ -41,12 +41,15 @@ Tests/ShortNoteKitTests/ 単体テスト（Swift Testing）
 justfile               開発用コマンド（build・run・try・reset-try・package・test・e2e）
 scripts/
   build.sh             Universal の ShortNote.app を build/ に作る
-  dmg.sh               build/ShortNote.dmg を作る（署名・公証は任意）
+  dmg.sh               build/ShortNote.dmg を作る（署名・公証は任意）。VERSION=X.Y.Z で、アプリの版を指定できる
   test.sh              単体テスト（Swift Testing のマクロプラグインのパスを渡す）
   make-icon.sh         アイコンを生成して Resources/ に置く（中で make-icon.swift を実行）
   make-icon.swift      アイコンの描画（CoreGraphics。外部の素材なし）
+  verify-dmg.sh        DMG を検査する（整合・中身・アイコン・版・Universal・署名）。ローカルと CI で同じもの
   native-e2e.swift     実機の操作・期待値・ピクセル判定と report
   native-dragsrc.swift ドロップ検証用の、自前のドラッグ元プロセス
+.github/workflows/
+  release.yml          タグ vX.Y.Z で、DMG をビルドして GitHub Release に添付する（手動実行は、アーティファクトだけ）
 .agents/skills/
   verifying-macos-apps/ 他の macOS アプリへ持ち出せる共通検証手順（ambien から取り込み）
   verifying-shortnote/  ShortNote 固有のケース・コマンド・証拠契約

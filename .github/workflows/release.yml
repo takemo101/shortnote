@@ -1,0 +1,147 @@
+# リリース：タグ vX.Y.Z の push で、DMG をビルドして GitHub Release に添付する（SPEC §10.1）。
+#
+#   git tag v1.0.0 && git push origin v1.0.0      タグの commit が main に含まれているときだけ、Release を作る
+#   手動実行（Actions タブ → Run workflow）        Release は作らない。DMG をアーティファクトに残すだけ（ドライラン）
+#
+# 署名は ad-hoc のまま。署名・公証の鍵や認証情報（secrets）は、このワークフローに渡さない。
+# 権限は最小：ビルドとテストは contents: read、Release の作成だけ contents: write。
+name: release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build, test and inspect the DMG
+    runs-on: macos-15
+    timeout-minutes: 40
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      asset: ${{ steps.meta.outputs.asset }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # タグの commit が main に含まれるかを調べるため、全部の履歴を取る
+
+      - name: Work out the version and the file name
+        id: meta
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          if [ "${REF_TYPE}" = "tag" ]; then
+            if ! [[ "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "タグ ${REF_NAME} は vX.Y.Z の形ではありません" >&2
+              exit 1
+            fi
+            version="${REF_NAME#v}"
+            asset="ShortNote-${version}.dmg"
+          else
+            # ドライラン。アプリの版は 0.0.0、ファイル名には commit を入れて、リリースと見分ける。
+            version="0.0.0"
+            asset="ShortNote-dev-${SHA:0:7}.dmg"
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "asset=${asset}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version} asset=${asset}"
+
+      - name: The tagged commit must be on main
+        if: github.ref_type == 'tag'
+        env:
+          SHA: ${{ github.sha }}
+        run: |
+          if ! git merge-base --is-ancestor "${SHA}" origin/main; then
+            echo "タグの commit ${SHA} は main に含まれていません。Release は作りません。" >&2
+            exit 1
+          fi
+
+      - name: Toolchain
+        run: |
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Unit tests
+        run: ./scripts/test.sh
+
+      - name: Build the DMG
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: ./scripts/dmg.sh
+
+      - name: Inspect the DMG
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: ./scripts/verify-dmg.sh build/ShortNote.dmg "${VERSION}"
+
+      - name: Name the file and write its SHA-256
+        env:
+          ASSET: ${{ steps.meta.outputs.asset }}
+        run: |
+          mkdir -p dist
+          cp build/ShortNote.dmg "dist/${ASSET}"
+          (cd dist && shasum -a 256 "${ASSET}" > "${ASSET}.sha256")
+          cat "dist/${ASSET}.sha256"
+          ls -l dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.asset }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish the GitHub Release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write   # Release の作成だけに、書き込みを許す
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.asset }}
+          path: dist
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          ASSET: ${{ needs.build.outputs.asset }}
+          REPO: ${{ github.repository }}
+        run: |
+          cat > notes.md <<'EOF'
+          ## インストール
+          1. DMG を開き、ShortNote を「Applications」へドラッグします。
+          2. 初回の起動は、署名が ad-hoc（Developer ID の署名・公証なし）のため、macOS の Gatekeeper に止められます。ShortNote を右クリック →「開く」、または次のコマンドで検疫属性を外してください。
+
+             ```sh
+             xattr -dr com.apple.quarantine /Applications/ShortNote.app
+             ```
+
+          macOS 13 以降。Apple Silicon と Intel の両対応（Universal）。使い方は [README](https://github.com/takemo101/shortnote#使い方) を参照してください。
+
+          ダウンロードしたファイルは、`.sha256` と照合できます：`shasum -a 256 -c ShortNote-*.dmg.sha256`
+
+          ## 変更点
+          EOF
+          gh release create "${TAG}" "dist/${ASSET}" "dist/${ASSET}.sha256" \
+            --repo "${REPO}" \
+            --verify-tag \
+            --title "ShortNote ${VERSION}" \
+            --notes-file notes.md \
+            --generate-notes

@@ -31,6 +31,12 @@
 
   `open -a ShortNote --args /path/to/image.png` は、**起動していないときにだけ**効きます。ターミナルから実行ファイルを直接実行する場合（`ShortNote /path/to/image.png`）は、起動済みでも渡されます。
 
+## ダウンロード
+
+[Releases](https://github.com/takemo101/shortnote/releases) から、`ShortNote-X.Y.Z.dmg` をダウンロードできます（タグ `vX.Y.Z` のときに、GitHub Actions が作ります。macOS 13 以降、Apple Silicon と Intel の両対応）。DMG を開いて、ShortNote を「Applications」へドラッグしてください。
+
+署名が ad-hoc（Developer ID の署名・公証なし）のため、初回は macOS の Gatekeeper に止められます。右クリック →「開く」、または `xattr -dr com.apple.quarantine /Applications/ShortNote.app` で開けます。
+
 ## ビルド
 
 macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）が必要です。

@@ -13,7 +13,8 @@
 | 単体テスト | `./scripts/test.sh`（Swift Testing）の pass | 画面に依存しない規則の入出力（履歴・サイズの検証・キーの割り当てと振り分け・保存・描画した PNG の画素・書き出し・画像の取り込み）。実ウィンドウ・実入力は示さない |
 | 自動の実機観測 | `scripts/native-e2e.swift` の pass | 自分で起動した候補の、実ウィンドウ・実入力・書き出し PNG の画素で観測した範囲 |
 | 人間の確認 | ⌃⌥N、筆圧、色選択、他アプリへのドラッグ | ユーザーが実機で見て判断したこと |
-| 配布物の検査 | DMG のマウント・署名・Gatekeeper | 配布物としての状態 |
+| 配布物の検査 | `./scripts/verify-dmg.sh`（ローカル、または CI の中） | DMG の整合・中身・アイコン・版・Universal・署名（`codesign --verify`）の観測。他の Mac での Gatekeeper の実際の挙動は示さない |
+| CI の実行 | GitHub Actions の `release` ワークフローの実行（`gh run view`） | GitHub のランナー（macOS）での、ビルド・単体テスト・DMG の検査。実機の操作（native E2E）と人間の確認は含まない |
 
 ## 検証の入口
 

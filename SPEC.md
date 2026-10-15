@@ -167,6 +167,16 @@
 - ライセンスは未設定。設定はユーザーが決める。
 - 署名鍵・認証情報をリポジトリや文書に置かない。
 
+### 10.1 GitHub Releases での配布
+
+- タグ `vX.Y.Z`（数字 3 つ）の push で、GitHub Actions（`.github/workflows/release.yml`）が DMG をビルドし、同名のタグの GitHub Release に添付する（ダウンロードできる）。ファイルは `ShortNote-X.Y.Z.dmg` と、その SHA-256（`ShortNote-X.Y.Z.dmg.sha256`）。リリースの公開は、利用者の依頼で、利用者がタグを打つ（またはタグの作成を依頼する）ことで行う。自動では公開しない。
+- 手動実行（`workflow_dispatch`）は、Release を作らない。DMG をアーティファクトに残すだけ（タグを打たずに、ビルドと検査を確かめるためのドライラン）。
+- 署名は ad-hoc のまま（上と同じ）。ワークフローに、署名・公証の鍵や認証情報（secrets）を渡さない。Developer ID 署名・公証を CI に入れるときは、先にこの節を更新する。
+- 権限は最小：ビルドとテストは `contents: read`、Release の作成だけ `contents: write`。第三者のアクションは使わず、GitHub 公式（`actions/*`）と、ランナーの `gh` だけを使う。
+- Release を作るのは、タグの commit が `main` に含まれているときだけ。
+- ビルドした DMG は、公開の前に検査する（`scripts/verify-dmg.sh`。ローカルと CI で同じもの）：DMG の整合、中身（アプリ・`/Applications` へのリンク・アイコン）、アプリの版がタグと一致、arm64 と x86_64 の両方を含む、署名の整合。検査に失敗したら、Release を作らない。
+- CI は、ビルド・単体テスト・DMG の検査までを行う。実機の操作を含む検証（native E2E）と人間の確認は、CI では行わない（[検証手順](docs/verification.md)）。
+
 ## 11. 構成と制約
 
 実装の対応は [構成説明](docs/architecture.md)。守る制約：
