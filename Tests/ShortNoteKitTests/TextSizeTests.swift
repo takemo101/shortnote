@@ -43,16 +43,42 @@ struct TextSizeTests {
         #expect(editor.finish() == nil)
     }
 
-    @Test("確定した文字は、確定したときの大きさのまま。変えた文字サイズは、次の入力から効く")
-    func committedTextKeepsItsSize() throws {
-        let (host, editor) = makeEditor()
-        _ = try begin(editor, in: host, size: 24, text: "one")
-        let first = try #require(editor.finish())
-        editor.setFontSize(96)                       // 入力欄が無いので、確定した文字には届かない
-        _ = try begin(editor, in: host, size: 96, text: "two")
-        let second = try #require(editor.finish())
-        #expect(first.fontSize == 24)
-        #expect(second.fontSize == 96)
+    /// 文字を入れて確定した、最後の文字の要素（大きさ、枠）。
+    private func commitText(_ canvas: CanvasView, _ text: String) throws -> (size: CGFloat, box: CGRect) {
+        let tv = try #require(canvas.subviews.compactMap { $0 as? NSTextView }.first)
+        tv.string = text
+        canvas.commitEditing()
+        let item = try #require(canvas.document.items.last)
+        guard case .text(_, let box) = item.content else { Issue.record("最後の要素が文字ではない"); throw CancellationError() }
+        return (item.size, box)
+    }
+
+    @Test("文字は、ブラシサイズではなく、文字サイズの大きさで確定する")
+    func committedTextFollowsTheTextSizeNotTheBrush() throws {
+        let canvas = CanvasView(frame: NSRect(x: 0, y: 0, width: 480, height: 320))
+        canvas.brushSize = 30          // 連動していた頃なら、12 + 30 × 1.5 = 57 pt になる
+        canvas.textSize = 48
+        canvas.beginText(at: CGPoint(x: 10, y: 10))
+        let committed = try commitText(canvas, "abc")
+        #expect(committed.size == 48)
+        #expect(committed.box.height >= 48)
+    }
+
+    @Test("入力中に変えた大きさで確定し、確定したあとに変えても、確定した文字は変わらない。次の入力から新しい大きさになる")
+    func liveChangeCommitsAndLaterChangesDoNotReachCommittedText() throws {
+        let canvas = CanvasView(frame: NSRect(x: 0, y: 0, width: 480, height: 320))
+        canvas.textSize = 18
+        canvas.beginText(at: CGPoint(x: 10, y: 10))
+        canvas.textSize = 64                       // 入力中に変える
+        let first = try commitText(canvas, "one")
+
+        canvas.textSize = 12                       // 確定したあと
+        #expect(canvas.document.items.last.map(\.size) == 64)
+
+        canvas.beginText(at: CGPoint(x: 10, y: 100))
+        let second = try commitText(canvas, "two")
+        #expect(first.size == 64)
+        #expect(second.size == 12)
     }
 
     @Test("既定の文字サイズは、選べる大きさの中にある。選べる大きさは、小さい順で重複がない")

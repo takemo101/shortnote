@@ -802,7 +802,7 @@ func textSizePopup() -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXPo
 /// ポップアップを開いて、`title`（例 "64 pt"）の項目を押す。選ばれたことまで見る。
 func chooseTextSize(_ title: String) -> Bool {
     guard let popup = textSizePopup() else { print("   chooseTextSize(\(title)): popup not found"); return false }
-    if axs(popup, "AXValue") == title { return true }   // すでに選ばれている項目を押すと、メニューが閉じず、次のクリックが取られる（ハーネス側の事情。実機の操作では、選び直しでも閉じる）
+    if axs(popup, "AXValue") == title { return true }   // すでに選ばれている項目を AXPress すると、メニューが閉じず、次のクリックが取られた（ハーネス側の事情として避ける。人間の操作で同じことが起きるかは、未観測）
     _ = AXUIElementPerformAction(popup, kAXPressAction as CFString)
     var item: AXUIElement? = nil
     _ = wait(3) { item = collect(popup) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first; return item != nil }
