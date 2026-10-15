@@ -11,6 +11,7 @@ ShortNote の補助文書の入口。製品要件・受け入れ条件・対象�
 | [開発規約](../AGENTS.md) | どう調査・変更・検証・文書更新するか | 製品仕様の複製・Issue 状態・作業履歴 |
 | [開発手順](development.md) | ビルド・mikan・GitButler・PR・配布物を、どう進めるか | 追加の実施権限・Issue 状態の複製 |
 | [構成説明](architecture.md) | Module の責務・状態の所有・座標と倍率・失敗はどう関係するか | 確定 API・実装順序・動作の保証 |
+| [参考にした設計原則](references.md) | どの外部の設計原則を選び、何を選ばなかったか。コードのどこに現れるか・レビューで何を問うか | 製品要件・原則の全文の複製 |
 | [検証手順と記録](verification.md) | SPEC の条件をどう観測し、何をいつ確認したか、何が人間の確認待ちか | 新しい合格条件・未実施の成功・実施権限 |
 | [macOS 共通検証スキル](../.agents/skills/verifying-macos-apps/SKILL.md) | アプリを問わず、実操作・期待値・画像・証拠をどう検証し、何を主張してよいか | 製品仕様・成功履歴・追加の操作権限 |
 | [ShortNote 固有レシピ](../.agents/skills/verifying-shortnote/SKILL.md) | 共通手順を、現存する ShortNote のケース・コマンドへどう対応付けるか | 仕様や Issue 状態の複製 |
@@ -32,11 +33,14 @@ SPEC.md                製品要件・受け入れ条件・対象外
 AGENTS.md              開発規約
 Package.swift          SwiftPM（macOS 13、外部依存なし）
 Resources/Info.plist   バンドル設定（LSUIElement・配備下限）
-Sources/ShortNote/     実装
-justfile               開発用コマンド（build・run・try・reset-try・package・e2e）
+Sources/ShortNote/     実行ファイル（main.swift だけ）
+Sources/ShortNoteKit/  実装（Core・Shortcuts・Render・Platform・UI・App）
+Tests/ShortNoteKitTests/ 単体テスト（Swift Testing）
+justfile               開発用コマンド（build・run・try・reset-try・package・test・e2e）
 scripts/
   build.sh             Universal の ShortNote.app を build/ に作る
   dmg.sh               build/ShortNote.dmg を作る（署名・公証は任意）
+  test.sh              単体テスト（Swift Testing のマクロプラグインのパスを渡す）
   native-e2e.swift     実機の操作・期待値・ピクセル判定と report
   native-dragsrc.swift ドロップ検証用の、自前のドラッグ元プロセス
 .agents/skills/
@@ -46,6 +50,7 @@ docs/
   README.md            この索引
   development.md       ビルド・mikan・GitButler・配布物
   architecture.md      構成・状態・座標・失敗
+  references.md        参考にした設計原則（選択と不採用）
   verification.md      検証手順・記録・人間の確認待ち
 ```
 

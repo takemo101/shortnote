@@ -36,8 +36,9 @@ macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）。外
 | `just build` | `./scripts/build.sh`。`build/ShortNote.app`（arm64 + x86_64）を ad-hoc 署名で作る |
 | `just run` | ビルドして `open` で起動する。ウィンドウが出て、閉じてもメニューバーに常駐する（再び出すのは ⌃⌥N かメニューバーのアイコン）。常駐中に実行すると、そのウィンドウを出す |
 | `just try [画像]` | ビルドして、実行ファイルを端末から起動する。ウィンドウが出て、ログが端末に出る。Ctrl-C で終了する。画像パスを渡すと背景として開く。**常駐中のインスタンスがあると、新しい起動はそちらへ転送して即終了する**（古い常駐を終了してから実行する） |
-| `just reset-try` | 書き出し済みの PNG（`/tmp/shortnote/`）と、保存したキャンバスのサイズを消す。ShortNote が持つ状態はこの 2 つ |
+| `just reset-try` | 書き出し済みの PNG（`/tmp/shortnote/`）と、保存したキャンバスのサイズ・ショートカットの割り当てを消す。ShortNote が持つ状態はこの 2 つ |
 | `just package` | `./scripts/dmg.sh`。`build/ShortNote.dmg` を作る（[配布物](#配布物)） |
+| `just test` | `./scripts/test.sh`。単体テスト（Swift Testing）を実行する。画面や実入力は使わない。Command Line Tools だけの環境では、`swift test` にマクロプラグインのパスを渡す必要があり、素の `swift test` は失敗することがある |
 | `just e2e` | ビルドして native E2E を実行する（[検証の入口](verification.md#検証の入口)）。実行中はマウスとキーボードに触れない |
 
 手で起動する場合：
@@ -47,7 +48,7 @@ open "$PWD/build/ShortNote.app"                              # 起動（相対�
 open -a "$PWD/build/ShortNote.app" /path/to/image.png        # 画像を背景として開く（起動済みでも、常駐中のウィンドウに入る）
 ```
 
-- アプリが保存する設定は、キャンバスのサイズだけ（`UserDefaults`、bundle ID `dev.takemo101.shortnote` の `canvasWidthPx`・`canvasHeightPx`）。書き出し先は固定の `/tmp/shortnote/`。検証では、bundle ID を変えたコピーを使うと、設定も常駐の転送も本番と分かれる（native E2E は、候補の設定を実行前に標準へそろえ、終了時に元へ戻す）。
+- アプリが保存する設定は、キャンバスのサイズ（`canvasWidthPx`・`canvasHeightPx`）と、既定から変えたショートカットの割り当て（`keyBindings`）だけ（`UserDefaults`、bundle ID `dev.takemo101.shortnote`）。書き出し先は固定の `/tmp/shortnote/`。検証では、bundle ID を変えたコピーを使うと、設定も常駐の転送も本番と分かれる（native E2E は、候補のこれらの設定を、実行前に控えて標準へそろえ、終了時に元へ戻す）。
 - 常駐中のインスタンスがあると、新しい起動はそちらへ転送して終了する。**検証用に起動する前に、古い候補が残っていないか確認する**（残っていると、新しい候補がウィンドウを出さずに終了する）。確認と終了は、自分が起動した PID を、起動時刻と実行ファイルを照合して行い、名前での一括終了はしない。
 - `swift build` のログに `x86_64 architecture is deprecated` の警告が出る。Intel を配布対象から外す判断をするまで、Universal を維持する。
 
