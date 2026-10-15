@@ -797,6 +797,19 @@ if let why = keyGuard(pid, app) {
     canvasWidthPt = 480
 } else { rec("L1-L3 clear", "blocked", "canvas frame unavailable") }
 
+// ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
+let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
+let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+let icnsPath = "\(appBundlePath)/Contents/Resources/\(iconName).icns"
+let menuPngPath = "\(appBundlePath)/Contents/Resources/MenuBarIcon.png"
+let icnsKind = sh(["file", "-b", icnsPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+let menuRep = load(menuPngPath)
+rec("I1 the bundle has AppIcon.icns (named in Info.plist) and the menu-bar image", (iconName == "AppIcon" && icnsKind.hasPrefix("Mac OS X icon") && menuRep?.pixelsWide == 72 && menuRep?.pixelsHigh == 72) ? "pass" : "fail",
+    "CFBundleIconFile='\(iconName)' file='\(icnsKind.prefix(40))' menu-bar png=\(menuRep.map { "\($0.pixelsWide)x\($0.pixelsHigh)" } ?? "missing")")
+let statusItem = statusMenuBar().flatMap { ($0 as AXUIElement).self }.flatMap { (ax($0, "AXChildren") as? [AXUIElement])?.first }
+let statusName = statusItem.map { "\(axs($0, "AXDescription")) \(axs($0, "AXTitle"))" } ?? "none"
+rec("I2 the menu-bar item exists and is named ShortNote", statusName.contains("ShortNote") ? "pass" : "fail", "AXDescription/AXTitle of the status item: '\(statusName)'")
+
 // Esc last
 if keyGuard(pid, app) == nil {
     key(53, [])

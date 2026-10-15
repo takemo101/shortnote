@@ -52,7 +52,7 @@ flowchart TD
 | | `CanvasSizing` | ウィンドウとキャンバスの大きさの対応、数値入力・エラーのダイアログ | なし |
 | | `ShortcutCenter` | `KeyBindings` と `Store` の窓口。変更を保存し、通知する | `bindings`、記録中か、全域キーを登録できているか |
 | | `ShortcutsWindowController` | ショートカットの設定ウィンドウとキーの記録 | 記録中のコマンド、ローカルのキー監視 |
-| | `StatusMenu` | メニューバーの項目 | `statusItem` |
+| | `StatusMenu` | メニューバーの項目。アイコンは、バンドルの `MenuBarIcon.png` をテンプレート画像（ダーク／ライトに追従）で使う。バンドルの外（`swift run`）では、システムのシンボルで代える | `statusItem` |
 | | `KeyChord+Event`、`DragHandleView` | `NSEvent` から `KeyChord` への変換（境界で一度だけ）、「ドラッグで渡す」 | なし |
 | `App/` | `AppDelegate`、`Launch` | 起動、`ShortcutCenter` の変更に応じた全域キーの登録し直し、多重起動の転送、`open`／CLI 引数での画像受け取り | `statusMenu`、`hotKey`、遅延生成のコントローラ |
 

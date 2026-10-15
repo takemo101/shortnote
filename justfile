@@ -39,6 +39,10 @@ package:
 test:
     ./scripts/test.sh
 
+# アイコン（Resources/AppIcon.icns、Resources/MenuBarIcon.png）を、scripts/make-icon.swift から作り直す。生成物はコミットする
+icon:
+    ./scripts/make-icon.sh
+
 # 実機の native E2E を実行する。bundle ID を変えたコピーで走るので、常駐中の ShortNote と保存サイズには触れない。実行中はマウスとキーボードに触れない（検証手順は docs/verification.md）
 e2e: build
     ./scripts/e2e.sh

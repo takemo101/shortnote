@@ -11,6 +11,9 @@ mkdir -p "$APP/Contents/MacOS"
 BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
 cp "$BIN/ShortNote" "$APP/Contents/MacOS/ShortNote"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# アイコン（scripts/make-icon.sh で生成してコミットしたもの）。MenuBarIcon.png は、メニューバーの項目が実行時に読む。
+mkdir -p "$APP/Contents/Resources"
+cp Resources/AppIcon.icns Resources/MenuBarIcon.png "$APP/Contents/Resources/"
 # SIGN_IDENTITY 未指定なら ad-hoc 署名（手元用）。Developer ID を指定すると Hardened Runtime つきで署名する。
 if [ -n "${SIGN_IDENTITY:-}" ]; then
     codesign --force --timestamp --options runtime --sign "$SIGN_IDENTITY" "$APP"

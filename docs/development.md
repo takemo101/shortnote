@@ -39,6 +39,7 @@ macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）。外
 | `just reset-try` | 書き出し済みの PNG（`/tmp/shortnote/`）と、保存したキャンバスのサイズ・ショートカットの割り当てを消す。ShortNote が持つ状態はこの 2 つ |
 | `just package` | `./scripts/dmg.sh`。`build/ShortNote.dmg` を作る（[配布物](#配布物)） |
 | `just test` | `./scripts/test.sh`。単体テスト（Swift Testing）を実行する。画面や実入力は使わない。Command Line Tools だけの環境では、`swift test` にマクロプラグインのパスを渡す必要があり、素の `swift test` は失敗することがある |
+| `just icon` | `./scripts/make-icon.sh`。`scripts/make-icon.swift` から、`Resources/AppIcon.icns` と `Resources/MenuBarIcon.png` を作り直す。デザインを変えたときだけ実行し、生成物をコミットする。`build.sh` が、これらをアプリの `Contents/Resources/` に入れる |
 | `just e2e` | ビルドして native E2E を実行する（[検証の入口](verification.md#検証の入口)）。実行中はマウスとキーボードに触れない |
 
 手で起動する場合：

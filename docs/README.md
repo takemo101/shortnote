@@ -32,7 +32,9 @@ README.md              概要・使い方・ビルド
 SPEC.md                製品要件・受け入れ条件・対象外
 AGENTS.md              開発規約
 Package.swift          SwiftPM（macOS 13、外部依存なし）
-Resources/Info.plist   バンドル設定（LSUIElement・配備下限）
+Resources/Info.plist   バンドル設定（LSUIElement・配備下限・アイコン）
+Resources/AppIcon.icns アプリのアイコン（scripts/make-icon.sh で生成したもの）
+Resources/MenuBarIcon.png メニューバーの単色アイコン（同上）
 Sources/ShortNote/     実行ファイル（main.swift だけ）
 Sources/ShortNoteKit/  実装（Core・Shortcuts・Render・Platform・UI・App）
 Tests/ShortNoteKitTests/ 単体テスト（Swift Testing）
@@ -41,6 +43,8 @@ scripts/
   build.sh             Universal の ShortNote.app を build/ に作る
   dmg.sh               build/ShortNote.dmg を作る（署名・公証は任意）
   test.sh              単体テスト（Swift Testing のマクロプラグインのパスを渡す）
+  make-icon.sh         アイコンを生成して Resources/ に置く（中で make-icon.swift を実行）
+  make-icon.swift      アイコンの描画（CoreGraphics。外部の素材なし）
   native-e2e.swift     実機の操作・期待値・ピクセル判定と report
   native-dragsrc.swift ドロップ検証用の、自前のドラッグ元プロセス
 .agents/skills/
