@@ -329,3 +329,13 @@ T2 は、日本語を `AXValue` で設定して確定する。実際の IME で�
 - **確認**：これまで、実機のマウスで端をドラッグした操作は、E2E（Z1〜Z4 は、Accessibility でサイズを設定する）でも観測していなかった。そこで、Z5・Z6 を足し、`main` のビルドで、全体を実行した（`build/native-e2e/run-20261015-201713/`、72/72 pass。実行ファイルの sha256 は、この版の `build/ShortNote.app` のもの）。Z5：ウィンドウの右下の角を +120×+80 pt ドラッグして、キャンバスが 480×320 → 600×400。Z6：同じだけ戻して、480×320。**端のドラッグは、この環境の新しいビルドで、効いている**。コードにも、再表示で保存した大きさへ戻す処理はない（`sizing.apply` は、起動時と、メニューで大きさを選んだときだけ）。
 - **ユーザーの回答**：症状を聞いたところ、「古いアプリを使っていたかもしれない」。再現は、していない。v0.2.0 の DMG で、最新のアプリを入れ直してもらう（常駐中のアプリを終了してから）。
 - **未観測**：ユーザーの環境で、古いアプリが原因だったこと（推測）。左右・上下の辺のドラッグ、他の角、メニューで大きさを選んだあとのドラッグ（ウィンドウを実機のマウスで操作したのは、右下の角だけ）。ドラッグで決めた大きさが、保存されないこと（仕様。SPEC §3.1.1：保存したサイズは変わらない）に、ユーザーが不満かどうかは、確かめていない。
+
+### 2026-10-15 — リリース v0.2.0（タグの経路の 2 回目、SNT-019）
+
+- **やったこと**：ユーザーの依頼（「次のバージョンをリリースしてください」）で、(1) アプリの版を `0.2.0` にして `main` に入れ（PR #16、merge commit `814aec49253d2154d7c7fc283533a17eee0494eb`。この PR には、ウィンドウの端のドラッグの E2E〔Z5・Z6〕も入れた。上の記録）、(2) その commit に、タグ `v0.2.0` を GitHub の API で作った（`AGENTS.md` の例外。依頼があったので）。作る前に、`main` の先頭がその commit であること、`main` の `Info.plist` が `0.2.0` であること、タグが `v0.1.0` だけであることを確認した。版は、v0.1.0 のあとに機能が増えた（文字サイズ、直線ツール、縁の不具合の修正）ので、0.x の規則でマイナーを上げた（ユーザーは版を指定していない。私が決めた）。
+- **ワークフロー**：run 38728287514（イベント `push`、タグ `v0.2.0`、commit `814aec4`）が success。`Build, test and inspect the DMG`（1 分 27 秒）と `Publish the GitHub Release`（6 秒）。**SNT-014 で更新した actions が、タグの経路で、初めて実際に動いた**：`actions/checkout@v7`（`fetch-depth: 0`）のあと、「The tagged commit must be on main」ステップが success（`origin/main` が引けた）。`actions/download-artifact@v8` が、DMG と `.sha256` を、ダイジェストの一致つき（`digest-mismatch: error`）で受け取り、`Check the downloaded files`（`sha256sum -c`）が `ShortNote-0.2.0.dmg: OK`、そのあと `gh release create` が success。
+- **Release**：https://github.com/takemo101/shortnote/releases/tag/v0.2.0 。名前 `ShortNote 0.2.0`、Latest、下書きでも先行リリースでもない。アセットは `ShortNote-0.2.0.dmg`（831977 バイト）と `.sha256`。DMG の SHA-256 は `d1491d8790cfc48840878a2ea9202883a571584bf06c46a7743bb1adedb7b58b`。ノートの変更点に、v0.1.0 のあとの PR（#10〜#16）が出る。
+- **ダウンロードの確認**：ログインなしの公開 URL から取得（HTTP 200）。`shasum -a 256 -c` が OK、手元の `./scripts/verify-dmg.sh ShortNote-0.2.0.dmg 0.2.0` が全項目 ok（整合・中身・アイコン・版 0.2.0・Universal・署名）。DMG の中のアプリを、bundle ID だけ変えたコピーにして起動し、「ShortNote」のパネルが出ること、版が `0.2.0` であることを確認した（起動した PID だけを終了）。
+- **前回の「未観測」のうち、観測できたもの**：新しい actions での `release` ジョブ（`checkout@v7` の `fetch-depth: 0` で `origin/main` が引けること、`download-artifact@v8`、公開前の SHA-256 照合）。
+- **実環境では未観測のまま**：版の不一致で Release が拒否されること（Actions 上では未実行）、他の Mac での Gatekeeper の実際の警告と、回避手順での起動、`/Applications` へ入れたあとの動作（SNT-011）、`ubuntu-latest` が Ubuntu 26 に移ったあとの動作（2026-10-19 の予告。今回は移行前）。
+- **注意**：ライセンスは、未設定のまま公開した（SNT-005）。Developer ID 署名・公証はなし（ad-hoc）。ユーザーの常駐中のアプリは古い可能性がある。新しい DMG から入れ直してもらう。
