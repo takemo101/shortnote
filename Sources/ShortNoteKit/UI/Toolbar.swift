@@ -9,6 +9,7 @@ final class Toolbar: NSObject {
     var onSelectTool: ((Tool) -> Void)?
     var onColor: ((NSColor) -> Void)?
     var onBrushSize: ((CGFloat) -> Void)?
+    var onTextSize: ((CGFloat) -> Void)?
     var onTransparent: ((Bool) -> Void)?
     var onPickImages: (() -> Void)?
     var onCopyPath: (() -> Void)?
@@ -19,7 +20,7 @@ final class Toolbar: NSObject {
     }
 
     private(set) lazy var topRow: NSStackView = {
-        let row = NSStackView(views: [tools, pickButton, colorWell, slider, transparentCheckbox])
+        let row = NSStackView(views: [tools, pickButton, colorWell, slider, textSizePopup, transparentCheckbox])
         row.orientation = .horizontal
         row.spacing = 12
         row.alignment = .centerY
@@ -77,6 +78,22 @@ final class Toolbar: NSObject {
         return slider
     }()
 
+    /// 文字を入れるときの大きさ（ブラシの太さとは別）。
+    private lazy var textSizePopup: NSPopUpButton = {
+        let popup = NSPopUpButton(frame: .zero, pullsDown: false)
+        popup.addItems(withTitles: TextSize.presets.map { "\(Int($0)) pt" })
+        popup.selectItem(at: TextSize.presets.firstIndex(of: TextSize.default) ?? 0)
+        popup.controlSize = .small
+        popup.font = .systemFont(ofSize: NSFont.systemFontSize(for: .small))
+        popup.target = self
+        popup.action = #selector(textSizeChanged(_:))
+        popup.refusesFirstResponder = true
+        popup.setAccessibilityLabel("文字サイズ")
+        popup.setAccessibilityIdentifier("text-size")
+        popup.toolTip = "文字サイズ"
+        return popup
+    }()
+
     private lazy var transparentCheckbox: NSButton = {
         let box = NSButton(checkboxWithTitle: "背景透過", target: self, action: #selector(transparentChanged(_:)))
         box.refusesFirstResponder = true
@@ -107,6 +124,9 @@ final class Toolbar: NSObject {
     /// 表示を、いまの状態に合わせる（キーボードで切り替えたときにも使う）。
     func show(tool: Tool) { tools.selectedSegment = tool.rawValue }
     func show(brushSize: CGFloat) { slider.doubleValue = Double(brushSize) }
+    func show(textSize: CGFloat) {
+        if let index = TextSize.presets.firstIndex(of: textSize) { textSizePopup.selectItem(at: index) }
+    }
     var color: NSColor {
         get { colorWell.color }
         set { colorWell.color = newValue }
@@ -139,6 +159,10 @@ final class Toolbar: NSObject {
     @objc private func toolChanged(_ sender: NSSegmentedControl) { onSelectTool?(Tool(rawValue: sender.selectedSegment) ?? .pen) }
     @objc private func colorChanged(_ sender: NSColorWell) { onColor?(sender.color) }
     @objc private func sizeChanged(_ sender: NSSlider) { onBrushSize?(CGFloat(sender.doubleValue)) }
+    @objc private func textSizeChanged(_ sender: NSPopUpButton) {
+        guard TextSize.presets.indices.contains(sender.indexOfSelectedItem) else { return }
+        onTextSize?(TextSize.presets[sender.indexOfSelectedItem])
+    }
     @objc private func transparentChanged(_ sender: NSButton) { onTransparent?(sender.state == .on) }
     @objc private func pickImages() { onPickImages?() }
     @objc private func copyPath() { onCopyPath?() }

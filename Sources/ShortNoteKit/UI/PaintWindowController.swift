@@ -53,9 +53,11 @@ final class PaintWindowController: NSObject {
 
         toolbar.color = canvas.color
         toolbar.show(brushSize: canvas.brushSize)
+        toolbar.show(textSize: canvas.textSize)
         toolbar.onSelectTool = { [weak self] tool in self?.canvas.tool = tool }
         toolbar.onColor = { [weak self] color in self?.canvas.color = color }
         toolbar.onBrushSize = { [weak self] size in self?.canvas.brushSize = size }
+        toolbar.onTextSize = { [weak self] size in self?.canvas.textSize = size }
         toolbar.onTransparent = { [weak self] on in self?.canvas.transparent = on }
         toolbar.onPickImages = { [weak self] in self?.pickImages() }   // ボタンは入力中でも効く（入力を確定してから開く）。キーの openImage は、入力中は無視する
         toolbar.onCopyPath = { [weak self] in self?.perform(.copyPath) }

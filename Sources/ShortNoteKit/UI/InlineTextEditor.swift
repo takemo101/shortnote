@@ -75,6 +75,14 @@ final class InlineTextEditor: NSObject, NSTextViewDelegate {
         close()
     }
 
+    /// 入力中の文字の大きさを変える（入力欄が無いときは何もしない）。以降に確定する文字も、この大きさになる。
+    func setFontSize(_ size: CGFloat) {
+        guard let tv = textView else { return }
+        fontSize = size
+        tv.font = NSFont.systemFont(ofSize: size, weight: .medium)
+        resize()
+    }
+
     private func close() {
         guard let tv = textView else { return }
         textView = nil
@@ -84,7 +92,10 @@ final class InlineTextEditor: NSObject, NSTextViewDelegate {
 
     // MARK: - NSTextViewDelegate
 
-    func textDidChange(_ notification: Notification) {
+    func textDidChange(_ notification: Notification) { resize() }
+
+    /// 入力欄の大きさを、文字の量と大きさに合わせる（幅はキャンバスの右端まで）。
+    private func resize() {
         guard let tv = textView, let host, let lm = tv.layoutManager, let tc = tv.textContainer else { return }
         lm.ensureLayout(for: tc)
         let used = lm.usedRect(for: tc)

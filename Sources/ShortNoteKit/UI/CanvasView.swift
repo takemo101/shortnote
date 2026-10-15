@@ -19,6 +19,10 @@ final class CanvasView: NSView {
     }
     var color: NSColor = .black
     var brushSize: CGFloat = 4
+    /// 文字サイズ（ブラシサイズとは別）。入力中に変えると、入力中の文字の大きさも変わる。
+    var textSize: CGFloat = TextSize.default {
+        didSet { editor.setFontSize(textSize) }
+    }
     var transparent = false {
         didSet {
             needsDisplay = true
@@ -31,7 +35,7 @@ final class CanvasView: NSView {
     /// 画像を取り込めなかったとき。何を見せる（ビープなど）かは、呼び出し側が決める。
     var onIntakeFailure: ((ImageIntakeError) -> Void)?
 
-    private var document = Document()
+    private(set) var document = Document()
     private var history = History<Document>()
     private var draft: Item?
     private var dragStart = CGPoint.zero
@@ -215,7 +219,7 @@ final class CanvasView: NSView {
         case .rect:
             draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize)
         case .text:
-            editor.begin(at: p, fontSize: 12 + brushSize * 1.5, color: color.cgColor)
+            beginText(at: p)
         case .move:
             if let index = document.topItemIndex(at: p) {
                 move = (index, document)
@@ -286,6 +290,11 @@ final class CanvasView: NSView {
         let size = CanvasRenderer.textSize(entry.text, size: entry.fontSize, color: entry.color)
         let item = Item(content: .text(entry.text, box: CGRect(origin: entry.anchor, size: size)), color: entry.color, size: entry.fontSize)
         commit(document.appending(item))
+    }
+
+    /// 文字ツールで、`point` に入力欄を開く。大きさは `textSize`、色は選んだ色。
+    func beginText(at point: CGPoint) {
+        editor.begin(at: point, fontSize: textSize, color: color.cgColor)
     }
 
     func cancelEditing() {
