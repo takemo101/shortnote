@@ -161,8 +161,21 @@ struct ItemEncoderTests {
 
     @Test("数：小数 3 桁に丸め、-0 を出さない")
     func numbers() {
-        #expect(ItemEncoder.number(1.23456) == 1.235)
-        #expect(ItemEncoder.number(-0.0001).sign == .plus)
-        #expect(ItemEncoder.number(10) == 10)
+        #expect(ItemEncoder.number(1.23456).stringValue == "1.235")
+        #expect(ItemEncoder.number(-0.0001).stringValue == "0")
+        #expect(ItemEncoder.number(10).stringValue == "10")
+    }
+
+    @Test("get の返事に出る数は、丸めた桁だけ（Double のままだと 10.300000000000001 と出る）")
+    func printedNumbersAreRounded() {
+        let canvas = FakeCanvas()
+        canvas.snapshot = AgentSnapshot(size: CGSize(width: 480.25, height: 320), background: CGRect(x: 0, y: 0.1, width: 7, height: 9), editing: false, items: [
+            Item(content: .rect(CGRect(x: 10.3, y: 1.235, width: 45.7, height: 0.1)), color: CGColor(gray: 0, alpha: 1), size: 4),
+        ])
+        let text = AgentService(canvas: canvas).handle(Data("get".utf8))
+        for expected in ["\"x\":10.3,", "\"y\":1.235}", "\"w\":45.7,", "\"h\":0.1,", "\"width\":480.25}", "\"y\":0.1}"] {
+            #expect(text.contains(expected), "\(expected) in \(text)")
+        }
+        #expect(!text.contains("0000000"))
     }
 }

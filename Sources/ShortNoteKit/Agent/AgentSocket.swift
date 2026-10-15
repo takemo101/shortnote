@@ -34,6 +34,7 @@ enum AgentSocket {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
         guard result == 0 else { close(fd); return nil }
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)   // 相手が受けない（固まっている）ときに、書き込み・読み込みの待ちが、時間で切れるように
         return fd
     }
 
@@ -86,11 +87,13 @@ final class AgentServer {
     private let handler: (Data) -> String
     private var listener: DispatchSourceRead?
     private var connections: [ObjectIdentifier: Connection] = [:]
+    private let queueKey = DispatchSpecificKey<Void>()
 
     init(path: String, queue: DispatchQueue = .main, handler: @escaping (Data) -> String) {
         self.path = path
         self.queue = queue
         self.handler = handler
+        queue.setSpecific(key: queueKey, value: ())
     }
 
     /// ディレクトリ（0700）とソケット（0600）を作って、受け始める。応答のない古いソケットは、作り直す。
@@ -105,7 +108,10 @@ final class AgentServer {
         var info = stat()
         if stat(directory.path, &info) == 0, info.st_uid == getuid(), info.st_mode & 0o777 != 0o700 { chmod(directory.path, 0o700) }
 
-        if FileManager.default.fileExists(atPath: path) {
+        var existing = stat()
+        if lstat(path, &existing) == 0 {
+            // 同じパスにあるのが、自分のソケットでなければ、消さない（利用者のファイルかもしれない）。
+            guard existing.st_mode & S_IFMT == S_IFSOCK, existing.st_uid == getuid() else { return .failure(.system("同じパスに、自分のソケットではないものがあります：\(path)")) }
             if let live = AgentSocket.connect(to: path) { close(live); return .failure(.alreadyServed) }
             unlink(path)   // 前回の異常終了で残った、応答のないソケット
         }
@@ -129,8 +135,14 @@ final class AgentServer {
         return .success(())
     }
 
-    /// 受けるのをやめて、ソケットのファイルを消す。
+    /// 受けるのをやめて、ソケットのファイルを消す。どのスレッドからでも呼べる（状態は、`queue` の上で触る）。
+    /// すでに `queue` の上にいるとき、または `queue` がメインキューでメインスレッドにいるとき（アプリの終了処理。`sync` すると固まる）は、そのまま実行する。
     func stop() {
+        let onQueue = DispatchQueue.getSpecific(key: queueKey) != nil || (queue === DispatchQueue.main && Thread.isMainThread)
+        if onQueue { stopNow() } else { queue.sync { stopNow() } }
+    }
+
+    private func stopNow() {
         listener?.cancel()
         listener = nil
         for connection in connections.values { connection.close() }
@@ -214,7 +226,7 @@ final class AgentServer {
 
         private func respond(to request: Data) {
             let reply = handler(request)
-            _ = AgentSocket.writeAll(fd, Data((reply + "\n").utf8), timeout: 5)
+            _ = AgentSocket.writeAll(fd, Data((reply + "\n").utf8), timeout: 2)   // 返事を読まない相手に、メインスレッドを長く取られない
             close()
         }
 

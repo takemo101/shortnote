@@ -15,7 +15,10 @@ struct OpsResult {
 /// 検証済みの操作を、`Item` にする（SPEC §3.7）。範囲外の座標は、エラーにせず、縁に丸める。
 enum OpsApply {
     /// ファイルから画像を読む（`ImageIntake` と同じ形式。PDF の最初のページを含む）。読めなければ `nil`。
+    /// 普通のファイルだけを読む（名前つきパイプやデバイスを指されても、読み込みで固まらない。シンボリックリンクは、先を見る）。
     static let loadFromDisk: (String) -> ImportedImage? = { path in
+        var info = stat()
+        guard stat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
         if case .success(let image) = ImageIntake.image(at: URL(fileURLWithPath: path)) { return image }
         return nil
     }

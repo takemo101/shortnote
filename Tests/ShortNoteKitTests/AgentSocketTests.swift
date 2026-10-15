@@ -62,7 +62,14 @@ struct AgentSocketTests {
         #expect(AgentSocket.writeAll(fd, Data("lo\n".utf8), timeout: 2))
         var buffer = [UInt8](repeating: 0, count: 64)
         var got = Data()
-        while !got.contains(0x0A) { let n = read(fd, &buffer, buffer.count); if n <= 0 { break }; got.append(contentsOf: buffer[0..<n]) }
+        let deadline = Date().addingTimeInterval(5)
+        while !got.contains(0x0A), Date() < deadline {
+            var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+            guard poll(&p, 1, 200) > 0 else { continue }
+            let n = read(fd, &buffer, buffer.count)
+            if n == 0 { break }
+            if n > 0 { got.append(contentsOf: buffer[0..<n]) }
+        }
         #expect(String(decoding: got, as: UTF8.self) == "echo:hello\n")
     }
 
@@ -191,6 +198,25 @@ struct LiveCommandTests {
         #expect(draw.launchesApp && draw.line.hasPrefix("draw {"))
     }
 
+    @Test("相対パスの画像がなければ、元のバイトをそのまま送る（改行だけ空白にする）。再エンコードで小数が 17 桁に膨らまない")
+    func originalBytesAreSentWhenNoPathChanges() throws {
+        let original = "{\"version\":1,\n \"ops\":[{\"op\":\"line\",\"from\":[45.7,0.1],\r\n\"to\":[1e2,12.3]},{\"op\":\"image\",\"path\":\"/abs/x.png\",\"x\":0,\"y\":0}]}"
+        let line = try request("draw", ["-"], stdin: original).get().line
+        let expected = "draw " + original.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
+        #expect(line == expected)
+    }
+
+    @Test("1 MiB 未満で、小数の多い要求（約 400 KB）は、そのまま通る（再エンコードすると 1 MiB を超えていた）")
+    func decimalHeavyRequestStaysUnderTheLimit() throws {
+        let points = (0..<10_000).map { _ in "[12.3,45.7]" }.joined(separator: ",")
+        let pen = "{\"op\":\"pen\",\"points\":[\(points)]}"
+        let doc = "{\"version\":1,\"ops\":[\(pen),\(pen),\(pen)]}"
+        #expect(doc.utf8.count < 500_000)
+        let line = try request("draw", ["-"], stdin: doc).get().line
+        #expect(line == "draw " + doc)
+        #expect(line.utf8.count - 5 <= OpsParser.maxBytes)
+    }
+
     @Test("draw の要求は、改行のない 1 行。相対パスの画像は、CLI を呼んだ場所からの絶対パスになる")
     func drawLineIsSingleAndAbsolute() throws {
         let pretty = """
@@ -237,5 +263,30 @@ struct LiveCommandTests {
         #expect(launched.count == 0)
         #expect(AgentCLI.run(["draw", "-"], readStdin: { Data(#"{"version":1,"ops":[{"op":"zzz"}]}"#.utf8) }, socketPath: socket, launch: { launched.increment(); return true }) == 1)
         #expect(launched.count == 0)   // 不正な操作では、アプリを起動しない
+    }
+}
+
+@Suite("ソケットと画像の読み込みの、危険な入力")
+struct AgentHazardTests {
+    @Test("同じパスに、ソケットではないもの（利用者のファイル）があるとき、消さず、始めない")
+    func nonSocketAtThePathIsLeftAlone() throws {
+        let dir = try tempDirectory(); defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let path = dir.appendingPathComponent("a.sock")
+        try Data("my notes".utf8).write(to: path)
+        let server = AgentServer(path: path.path, queue: DispatchQueue(label: "test.hazard"), handler: { _ in "" })
+        guard case .failure(.system) = server.start() else { Issue.record("始めてしまった"); return }
+        #expect(try String(contentsOf: path, encoding: .utf8) == "my notes")
+    }
+
+    @Test("画像の読み込みは、普通のファイルだけ（名前つきパイプ・ディレクトリ・無いパスでは、固まらず、nil）")
+    func loaderRefusesNonRegularFiles() throws {
+        let dir = try tempDirectory(); defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let fifo = dir.appendingPathComponent("pipe").path
+        #expect(mkfifo(fifo, 0o600) == 0)
+        #expect(OpsApply.loadFromDisk(fifo) == nil)
+        #expect(OpsApply.loadFromDisk(dir.path) == nil)
+        #expect(OpsApply.loadFromDisk(dir.appendingPathComponent("none.png").path) == nil)
     }
 }

@@ -24,7 +24,9 @@ enum LiveCommand {
         }
     }
 
-    /// 操作の JSON を検証して（不正なら、アプリに触れずに断る）、相対パスの画像を絶対パスにして、1 行にする。
+    /// 操作の JSON を検証して（不正なら、アプリに触れずに断る）、改行のない 1 行にする。
+    /// 元のバイトを、そのまま送る（JSON の改行は、空白としてだけ現れるので、空白に替える）。再エンコードすると、小数が 17 桁に膨らみ、
+    /// 1 MiB 未満の要求が、アプリ側の上限を超える。相対パスの画像があるときだけ、そのパスを、CLI を呼んだ場所からの絶対パスにするため、再エンコードする。
     private static func drawRequest(source: String, readStdin: () -> Data) -> Result<Request, AgentError> {
         let data: Data
         if source == "-" {
@@ -35,17 +37,25 @@ enum LiveCommand {
         }
         if case .failure(let error) = OpsParser.parse(data) { return .failure(error) }
 
-        // 検証を通ったので、形は確か。画像のパスだけ、CLI を呼んだ場所からの絶対パスにして、改行のない 1 行にする。
-        guard var root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], var ops = root["ops"] as? [[String: Any]] else {
+        // 検証を通ったので、形は確か。
+        guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any], let ops = root["ops"] as? [[String: Any]] else {
             return .failure(.invalid("JSON として読めません"))
         }
-        for i in ops.indices where ops[i]["op"] as? String == "image" {
-            if let path = ops[i]["path"] as? String { ops[i]["path"] = URL(fileURLWithPath: path).standardizedFileURL.path }
+        let hasRelativeImage = ops.contains { $0["op"] as? String == "image" && !(($0["path"] as? String)?.hasPrefix("/") ?? true) }
+        var body = data
+        if hasRelativeImage {
+            var absolute = root, absoluteOps = ops
+            for i in absoluteOps.indices where absoluteOps[i]["op"] as? String == "image" {
+                if let path = absoluteOps[i]["path"] as? String { absoluteOps[i]["path"] = URL(fileURLWithPath: path).standardizedFileURL.path }
+            }
+            absolute["ops"] = absoluteOps
+            guard let encoded = try? JSONSerialization.data(withJSONObject: absolute, options: [.withoutEscapingSlashes]) else {
+                return .failure(.invalid("JSON を組み立てられません"))
+            }
+            body = encoded
         }
-        root["ops"] = ops
-        guard let line = try? JSONSerialization.data(withJSONObject: root, options: [.withoutEscapingSlashes]) else {
-            return .failure(.invalid("JSON を組み立てられません"))
-        }
-        return .success(Request(line: "draw " + String(decoding: line, as: UTF8.self), launchesApp: true))
+        body = Data(body.map { $0 == 0x0A || $0 == 0x0D ? 0x20 : $0 })
+        guard body.count <= OpsParser.maxBytes else { return .failure(.invalid("要求が大きすぎます（1 MiB まで。画像のパスを絶対パスにしたあとの大きさ）")) }
+        return .success(Request(line: "draw " + String(decoding: body, as: UTF8.self), launchesApp: true))
     }
 }

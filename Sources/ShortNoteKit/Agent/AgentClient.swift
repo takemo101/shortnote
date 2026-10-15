@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Foundation
 
@@ -13,7 +14,7 @@ enum AgentClient {
     static func send(_ request: String, socketPath: String, launch: (() -> Bool)? = nil, launchWait: TimeInterval = AgentClient.launchWait, replyTimeout: TimeInterval = AgentClient.replyTimeout) -> Result<String, AgentError> {
         var fd = AgentSocket.connect(to: socketPath)
         if fd == nil, let launch {
-            guard launch() else { return .failure(unreachable("アプリを起動できませんでした", socketPath)) }
+            guard launch() else { return .failure(unreachable("アプリを起動できませんでした（すでに動いていて、受け口に届かないときは、ShortNote を終了して、起動し直してください。古い版が動いているのかもしれません）", socketPath)) }
             let deadline = Date().addingTimeInterval(launchWait)
             while fd == nil, Date() < deadline {
                 usleep(100_000)
@@ -21,7 +22,7 @@ enum AgentClient {
             }
         }
         guard let fd else {
-            let hint = launch == nil ? "（ShortNote が起動していません。`draw` は、起動してから送ります）" : "（\(Int(launchWait)) 秒待っても、応答がありません）"
+            let hint = launch == nil ? "（ShortNote が起動していないか、受け口のない古い版が動いています。`draw` は、起動していなければ起動します）" : "（\(Int(launchWait)) 秒待っても、応答がありません）"
             return .failure(unreachable("ShortNote に届きません\(hint)", socketPath))
         }
         defer { close(fd) }
@@ -70,7 +71,10 @@ enum AgentClient {
     }
 
     /// アプリを、フォーカスを奪わずに起動する（実行ファイルが `ShortNote.app` の中にあるとき）。
+    /// すでに同じバンドル ID のアプリが動いているときは、起動しない（`open` は、動いているアプリに再び開く要求を送り、前面にしうる）。
     static func launchApp() -> Bool {
+        if let id = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != getpid() }) { return false }
         let bundle = Bundle.main.bundleURL
         guard bundle.pathExtension == "app" else { return false }
         let process = Process()

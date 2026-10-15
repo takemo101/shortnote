@@ -1082,6 +1082,7 @@ let agentIds = [
     "G9 draw while the panel is hidden shows it again without taking focus from the frontmost app",
     "G10 draw launches the app when it is not running (without taking focus), and a stale socket from a killed app is replaced",
     "G11 a request that cannot reach the app exits 3 (unreachable); an invalid or oversized request exits 1 without touching the canvas",
+    "G12 a normal quit (terminate, not SIGTERM) ends the app within 5 s and removes its socket file",
 ]
 var G11state: (Int32, Int32, Int?, Int?, Int, [String: Any]?)? = nil
 if agentSocketPath.utf8.count > 103 {
@@ -1260,7 +1261,15 @@ if proc.isRunning {
         let okSize = cf3.map { abs($0.width - 640) < 1 && abs($0.height - 360) < 1 } ?? false
         rec("S6 the saved canvas size is applied on the next launch", okSize ? "pass" : "fail", "relaunched candidate canvas \(cf3.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unavailable") pt (expect 640x360 = 1280x720 px)")
     }
-    if sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == start3 { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
+    // G12：普通の終了（Cmd+Q と同じ、終了の要求）。アプリが終わり（終了処理で固まらない）、ソケットのファイルが消える
+    if sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == start3 {
+        let before = FileManager.default.fileExists(atPath: agentSocketPath)
+        NSRunningApplication(processIdentifier: pid3)?.terminate()
+        let exited = wait(5) { !p3.isRunning }
+        let removed = !FileManager.default.fileExists(atPath: agentSocketPath)
+        rec(agentIds[11], (before && exited && removed) ? "pass" : "fail", "socket file existed before the quit=\(before); app exited within 5 s=\(exited); socket file removed=\(removed)")
+        if p3.isRunning { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
+    } else { rec(agentIds[11], "blocked", "the relaunched candidate could not be identified by its start time") }
     // G10：アプリが動いていないとき、draw が起動する（フォーカスを奪わない）
     if agentSocketPath.utf8.count <= 103, let o = prevFront, o.processIdentifier != pid {
         _ = wait(3) { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty }

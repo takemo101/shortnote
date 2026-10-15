@@ -147,14 +147,14 @@ struct CanvasAgentTests {
         #expect(canvas.document.items.count == 1 && minX(canvas.document.items[0]) == original)
     }
 
-    @Test("clear：消すものが無いときは false で、履歴に積まない")
+    @Test("clear：消すものが無いときは false で、履歴に積まない（やり直しも消さない）")
     func clearNothing() {
         let canvas = makeCanvas()
-        #expect(!canvas.clearFromAgent())
         canvas.appendFromAgent([rectItem(10, 10)])
-        canvas.undo()
-        canvas.undo()   // 積まれていれば、ここで何かが変わる
-        #expect(canvas.document.items.isEmpty)
+        canvas.undo()                          // 空。やり直しが 1 つある
+        #expect(!canvas.clearFromAgent())
+        canvas.redo()                          // 空の clear が履歴を積むと、やり直しが消えて、ここで戻らない
+        #expect(canvas.document.items.count == 1)
     }
 
     @Test("書き出す内容は、確定済みだけ。動かしている途中の位置は含めない")

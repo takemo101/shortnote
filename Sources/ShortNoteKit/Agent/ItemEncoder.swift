@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 
 /// 要素（`Item`）を、操作の JSON と同じ形にする（`get` の `items`。SPEC §3.7）。`index` は重なり順（0 が奥）。
-/// 座標・大きさは、小数 3 桁に丸める。筆圧は出さない。画像は、`path` を持たない（取り込み済みで、元のファイルは分からない）。
+/// 座標・大きさは、小数 3 桁に丸める（`number(_:)`）。筆圧は出さない。画像は、`path` を持たない（取り込み済みで、元のファイルは分からない）。
 enum ItemEncoder {
     static func json(_ item: Item, index: Int) -> [String: Any] {
         var out: [String: Any] = ["index": index]
@@ -43,10 +43,10 @@ enum ItemEncoder {
         ["x": number(rect.minX), "y": number(rect.minY), "w": number(rect.width), "h": number(rect.height)]
     }
 
-    /// 小数 3 桁に丸める（`-0` は `0` にする）。
-    static func number(_ value: CGFloat) -> Double {
-        let rounded = (Double(value) * 1000).rounded() / 1000
-        return rounded + 0
+    /// 小数 3 桁に丸めた数（`-0` は `0`）。`NSDecimalNumber` なので、JSON に、丸めた桁だけが出る（`Double` のままだと、`10.3` が `10.300000000000001` と出る）。
+    static func number(_ value: CGFloat) -> NSDecimalNumber {
+        let rounded = (Double(value) * 1000).rounded() / 1000 + 0
+        return NSDecimalNumber(string: String(format: "%.3f", rounded), locale: Locale(identifier: "en_US_POSIX"))
     }
 
     /// sRGB の `"#RRGGBB"`。透明度があれば `"#RRGGBBAA"`。
