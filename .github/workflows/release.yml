@@ -56,6 +56,14 @@ jobs:
               exit 1
             fi
             version="${REF_NAME#v}"
+            # アプリの版（ソースの Info.plist）が、タグと一致していること。版を上げる変更を main に入れてから、タグを付ける。
+            for key in CFBundleShortVersionString CFBundleVersion; do
+              plist_version="$(plutil -extract "${key}" raw Resources/Info.plist)"
+              if [ "${plist_version}" != "${version}" ]; then
+                echo "Resources/Info.plist の ${key}（${plist_version}）が、タグの版 ${version} と違います。版を上げる変更を main に入れてから、タグを付けてください。" >&2
+                exit 1
+              fi
+            done
             asset="ShortNote-${version}.dmg"
           else
             # ドライラン（手動実行・Pull Request。手動実行をタグの上で起動しても、ここ）。アプリの版は 0.0.0、ファイル名には commit を入れて、リリースと見分ける。

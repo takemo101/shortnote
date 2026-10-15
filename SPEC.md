@@ -169,11 +169,12 @@
 
 ### 10.1 GitHub Releases での配布
 
-- タグ `vX.Y.Z`（数字 3 つ）の push で、GitHub Actions（`.github/workflows/release.yml`）が DMG をビルドし、同名のタグの GitHub Release に添付する（ダウンロードできる）。ファイルは `ShortNote-X.Y.Z.dmg` と、その SHA-256（`ShortNote-X.Y.Z.dmg.sha256`）。リリースの公開は、利用者の依頼で、**利用者が自分でタグを打つ**ことで行う（エージェントは、規約により raw Git で書き込まないので、タグを打たない）。自動では公開しない。
+- タグ `vX.Y.Z`（数字 3 つ）の push で、GitHub Actions（`.github/workflows/release.yml`）が DMG をビルドし、同名のタグの GitHub Release に添付する（ダウンロードできる）。ファイルは `ShortNote-X.Y.Z.dmg` と、その SHA-256（`ShortNote-X.Y.Z.dmg.sha256`）。リリースの公開は、利用者の依頼があったときだけ行う。自動では公開しない。タグは、利用者が自分で打つか、依頼を受けたエージェントが作る。エージェントは、規約により raw Git で書き込まない（`but` にはタグの操作が無い）ので、GitHub の API でサーバー側にタグを作る。
 - 手動実行（`workflow_dispatch`）と、リリースに関わるファイル（ワークフロー、`scripts/` のビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request は、Release を作らない。手動実行を、タグを選んで起動した場合も同じ。DMG をアーティファクトに残すだけ（タグを打たずに、ビルドと検査を確かめるためのドライラン）。Pull Request の実行にも、secrets は渡らず、権限は `contents: read` のまま。Release を作るのは、タグの push のときだけ。
 - 署名は ad-hoc のまま（上と同じ）。ワークフローに、署名・公証の鍵や認証情報（secrets）を渡さない。Developer ID 署名・公証を CI に入れるときは、先にこの節を更新する。
 - 権限は最小：ビルドとテストは `contents: read`、Release の作成だけ `contents: write`。第三者のアクションは使わず、GitHub 公式（`actions/*`）と、ランナーの `gh` だけを使う。
 - Release を作るのは、タグの commit が `main` に含まれているときだけ。
+- アプリの版（`Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion`）は、タグの `X.Y.Z` と一致していなければならない。一致しないタグでは、Release を作らない。版を上げる変更を `main` に入れてから、その commit にタグを付ける（版の信頼できる元は、ソースの `Info.plist`。ビルドの `VERSION` は、ドライランの版を 0.0.0 にするためだけに使い、タグのビルドでは、`Info.plist` と同じ値になる）。
 - ビルドした DMG は、公開の前に検査する（`scripts/verify-dmg.sh`。ローカルと CI で同じもの）：DMG の整合、中身（アプリ・`/Applications` へのリンク・アイコン）、アプリの版がタグと一致、arm64 と x86_64 の両方を含む、署名の整合。検査に失敗したら、Release を作らない。
 - CI は、ビルド・単体テスト・DMG の検査までを行う。実機の操作を含む検証（native E2E）と人間の確認は、CI では行わない（[検証手順](docs/verification.md)）。
 
