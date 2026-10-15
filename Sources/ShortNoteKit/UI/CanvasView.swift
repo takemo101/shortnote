@@ -198,8 +198,9 @@ final class CanvasView: NSView {
 
     // MARK: - ポインタ
 
+    /// ポインタの位置（キャンバスの座標）。キャンバスの外へ出たら、縁の位置に丸める（SPEC §3.2）。
     private func location(_ event: NSEvent) -> CGPoint {
-        convert(event.locationInWindow, from: nil)
+        convert(event.locationInWindow, from: nil).clamped(to: bounds)
     }
 
     /// 筆圧はタブレット入力のときだけ使う。トラックパッドの感圧では太さを変えない。
@@ -232,7 +233,7 @@ final class CanvasView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let p = location(event)
         if let move {
-            guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y)) else { return }
+            guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
             document = moved
             needsDisplay = true
             return
@@ -256,7 +257,7 @@ final class CanvasView: NSView {
         if let finished = move {
             move = nil
             window?.invalidateCursorRects(for: self)
-            if location(event) != dragStart {
+            if document.hasMovedItem(at: finished.index, since: finished.base) {   // 上限で止まって動かなかったドラッグは、取り消しの段にしない
                 history.record(previous: finished.base)
                 changed()
             }

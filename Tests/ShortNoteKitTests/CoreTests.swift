@@ -126,11 +126,61 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
         #expect(one.items.count == 1)
     }
 
+    private let canvas = CGRect(x: 0, y: 0, width: 480, height: 320)
+
     @Test func translatingItem_rejectsAnOutOfRangeIndex() {
         let doc = Document().appending(rectItem(CGRect(x: 0, y: 0, width: 10, height: 10)))
-        #expect(doc.translatingItem(at: 1, by: CGSize(width: 1, height: 1)) == nil)
-        #expect(doc.translatingItem(at: -1, by: CGSize(width: 1, height: 1)) == nil)
-        #expect(doc.translatingItem(at: 0, by: CGSize(width: 1, height: 1)) != nil)
+        let d = CGSize(width: 1, height: 1)
+        #expect(doc.translatingItem(at: 1, by: d, keepingGrabAreaIn: canvas) == nil)
+        #expect(doc.translatingItem(at: -1, by: d, keepingGrabAreaIn: canvas) == nil)
+        #expect(doc.translatingItem(at: 0, by: d, keepingGrabAreaIn: canvas) != nil)
+    }
+
+    @Test func limited_leavesAMoveThatKeepsEnoughInsideUnchanged() {
+        let area = CGRect(x: 94, y: 94, width: 112, height: 112)
+        #expect(Document.limited(CGSize(width: 30, height: -20), for: area, in: canvas, keep: 16) == CGSize(width: 30, height: -20))
+    }
+
+    @Test func limited_stopsEachAxisWhereOnlyTheKeptLengthRemains() {
+        let area = CGRect(x: 94, y: 94, width: 112, height: 112)
+        // 右下へ大きく動かす：掴める範囲の左上が、キャンバスの右端・下端から 16 pt 手前まで（x: 480−16−94、y: 320−16−94）
+        #expect(Document.limited(CGSize(width: 9999, height: 9999), for: area, in: canvas, keep: 16) == CGSize(width: 370, height: 210))
+        // 左上へ大きく動かす：掴める範囲の右下が、キャンバスの左端・上端から 16 pt 内側まで（x: 16−206、y: 16−206）
+        #expect(Document.limited(CGSize(width: -9999, height: -9999), for: area, in: canvas, keep: 16) == CGSize(width: -190, height: -190))
+    }
+
+    @Test func limited_keepsTheWholeOfAnItemSmallerThanTheKeptLength() {
+        let area = CGRect(x: 100, y: 100, width: 10, height: 10)
+        let r = Document.limited(CGSize(width: 9999, height: 0), for: area, in: canvas, keep: 16)
+        #expect(r.width == 370, "got \(r.width)")
+    }
+
+    @Test func hasMovedItem_isFalseWhenTheLimitStoppedTheMoveEntirely() {
+        // 掴める範囲（外接する範囲＋余白 4 pt。線の太さ 4 で、矩形から 6 pt 外側）の左上が、ちょうど (464, 304)＝縁から 16 pt の位置にある楕円。これ以上、右下へは動かせない。
+        let base = Document().appending(Item(content: .ellipse(CGRect(x: 470, y: 310, width: 100, height: 100)), color: black, size: 4))
+        let stuck = base.translatingItem(at: 0, by: CGSize(width: 50, height: 50), keepingGrabAreaIn: canvas)
+        #expect(stuck?.hasMovedItem(at: 0, since: base) == false)
+        let back = base.translatingItem(at: 0, by: CGSize(width: -50, height: -50), keepingGrabAreaIn: canvas)   // 戻す向きは動く
+        #expect(back?.hasMovedItem(at: 0, since: base) == true)
+        #expect(base.hasMovedItem(at: 5, since: base) == false)   // 範囲外の番号
+    }
+
+    @Test func limited_neverPullsAnItemThatIsAlreadyMostlyOutside() {
+        // 右の縁から 3 pt だけ中にある（x 477〜）要素を、いま掴んだ。その 3 pt は、そのまま保てる（動かし始めで飛ばない）が、これ以上は外へ出せない。
+        let area = CGRect(x: 477, y: 100, width: 100, height: 50)
+        #expect(Document.limited(CGSize(width: 0, height: 0), for: area, in: canvas, keep: 16) == .zero)
+        #expect(Document.limited(CGSize(width: 50, height: 0), for: area, in: canvas, keep: 16).width == 0)
+        #expect(Document.limited(CGSize(width: -50, height: 0), for: area, in: canvas, keep: 16).width == -50)
+    }
+
+    @Test func translatingItem_afterAHugeMoveFromAnEmptyCorner_theItemCanStillBeGrabbed() {
+        // 楕円（100,100)〜(200,200）の、何も描かれていない左上の角（103,103）を掴んで、右下の遠くまで動かした場合と同じ量。
+        let doc = Document().appending(Item(content: .ellipse(CGRect(x: 100, y: 100, width: 100, height: 100)), color: black, size: 4))
+        let moved = doc.translatingItem(at: 0, by: CGSize(width: 377, height: 217), keepingGrabAreaIn: canvas)
+        let far = doc.translatingItem(at: 0, by: CGSize(width: 99999, height: 99999), keepingGrabAreaIn: canvas)
+        // キャンバスの中のクリックで、また掴める（右端・下端は、クリックの位置の範囲に入らないので、その手前で掴む）
+        #expect(moved?.topItemIndex(at: CGPoint(x: 470, y: 310)) == 0)
+        #expect(far?.topItemIndex(at: CGPoint(x: 479.5, y: 319.5)) == 0)
     }
 
     @Test func topItemIndex_picksTheFrontMostItemUnderThePoint() {

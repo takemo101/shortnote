@@ -870,6 +870,57 @@ if let why = keyGuard(pid, app) {
     canvasWidthPt = 480
 } else { for id in textSizeIds { rec(id, "blocked", "the text-size popup (AXIdentifier text-size) or the canvas frame was not found\n" + dumpTree(app)) } }
 
+// ---- キャンバスの縁（A18）：キャンバスの外へ出す操作で、要素が掴めなくなったり、外へはみ出したりしない ----
+// ポインタは、自分のウィンドウの中（キャンバスの右の余白と、上のツールバーの帯）までしか出さない。
+let edgeIds = ["B1 moving an item past the canvas edge keeps part of it in the canvas", "B2 an item moved past the edge can be grabbed and moved back", "B3 a shape dragged past the right edge ends at the edge", "B4 an item grabbed by an empty corner of its box and dragged far out can still be grabbed and moved back"]
+if let why = keyGuard(pid, app) {
+    for id in edgeIds { rec(id, "blocked", "keyboard guard: \(why)") }
+} else if let cf = canvasFrame() {
+    let W = Double(cf.width)
+    canvasWidthPt = W
+    key(40, .maskCommand)   // 描いたものを消す
+
+    // B3：四角を、右の縁の外（余白）までドラッグする。右の辺は、キャンバスの縁にある（外の余白では、書き出しに出ない）。
+    if selectTool(2), drag(line(pt(300, 20), pt(W + 8, 50)), pid: pid), let r = exportImg() {
+        let edge = darkest(r, W - 1, 35)
+        rec(edgeIds[2], isDark(edge) ? "pass" : "fail", "dark pixel at the right edge (x=\(Int(W) - 1), y=35, between the top and bottom sides): lum=\(String(format: "%.2f", edge.lum)); the pointer ended 8 pt outside the canvas")
+    } else { rec(edgeIds[2], "blocked", "tool select / drag guard / export failed") }
+    key(40, .maskCommand)
+
+    // B1・B2：キャンバスの上の縁に近い四角を、上へ（ツールバーの帯まで）動かす。
+    var rectDrawn = false
+    if selectTool(2), drag(line(pt(100, 12), pt(180, 42)), pid: pid), let r0 = exportImg() { rectDrawn = countDark(r0, 90, 0, 190, 50) > 200 }
+    if rectDrawn, selectTool(4), drag(line(pt(140, 27), pt(140, -30)), pid: pid), let r1 = exportImg() {
+        let kept = countDark(r1, 90, 0, 190, 40)
+        rec(edgeIds[0], kept > 200 ? "pass" : "fail", "dark pixels of the moved rectangle left inside the canvas (x 90-190, y 0-40) = \(kept) (need > 200; 0 means it was carried out of the canvas and cannot be seen or grabbed)")
+        // 戻す：キャンバスの上の縁（y=3）から下へ。要素が縁に残っていれば、掴めて、100 pt 下がる（左の辺が x=100、y=85〜115）。
+        if drag(line(pt(140, 3), pt(140, 103)), pid: pid), let r2 = exportImg() {
+            let back = darkest(r2, 100, 100)
+            rec(edgeIds[1], isDark(back) ? "pass" : "fail", "after dragging from (140, 3) down 100 pt: dark pixel on the rectangle's left side at (100, 100): lum=\(String(format: "%.2f", back.lum))")
+        } else { rec(edgeIds[1], "blocked", "drag guard / export failed") }
+    } else {
+        rec(edgeIds[0], "blocked", "the rectangle was not drawn (drawn=\(rectDrawn)) or the move drag / export failed")
+        rec(edgeIds[1], "blocked", "depends on B1")
+    }
+    key(40, .maskCommand)
+
+    // B4：楕円の外接する範囲の、何も描かれていない左上の角（外側）を掴んで、右下の外（余白・下の帯）まで動かす。
+    // 掴んだ点だけをキャンバスの中に残しても、楕円の輪は、角から遠いので、完全に外へ出てしまう。掴める範囲が残っていれば、また掴んで戻せる。
+    let H = Double(cf.height)
+    if selectTool(1), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
+       selectTool(4), drag(line(pt(103, 103), pt(W + 8, H + 20)), pid: pid) {
+        // 掴める範囲（外接する範囲＋4 pt）の、16 pt が、右下の角に残る。そこ（W-10, H-10）を掴んで、左上へ戻す。
+        let back = (dx: -300.0, dy: -200.0)
+        let moved = drag(line(pt(W - 10, H - 10), pt(W - 10 + back.dx, H - 10 + back.dy)), pid: pid)
+        let shift = (x: (W - 110) + back.dx, y: (H - 110) + back.dy)   // 1 回目：掴める範囲が、右下に 16 pt 残る位置まで。2 回目：戻した量
+        if moved, let r = exportImg() {
+            let ring = darkest(r, 100 + shift.x, 150 + shift.y)   // 楕円の左端（元は (100, 150)）
+            rec(edgeIds[3], isDark(ring) ? "pass" : "fail", "after dragging from the empty top-left corner (103,103) out past the bottom-right and back from (\(Int(W) - 10), \(Int(H) - 10)): dark pixel on the ellipse's left end at (\(Int(100 + shift.x)), \(Int(150 + shift.y))): lum=\(String(format: "%.2f", ring.lum))")
+        } else { rec(edgeIds[3], "blocked", "drag guard / export failed on the recovery drag") }
+    } else { rec(edgeIds[3], "blocked", "the ellipse was not drawn, or the tool select / drag guard failed") }
+    canvasWidthPt = 480
+} else { for id in edgeIds { rec(id, "blocked", "canvas frame unavailable") } }
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
