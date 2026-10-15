@@ -133,6 +133,14 @@ let dragsrcOK = dragsrcBuild.0 == 0
 if !dragsrcOK { print("note: native-dragsrc did not compile; D1/M1-M3 will be blocked: \(dragsrcBuild.1.prefix(200))") }
 
 FileManager.default.createFile(atPath: "\(work)/cand.log", contents: nil, attributes: [.posixPermissions: 0o600])
+// ---- 設定の隔離：キャンバスサイズの保存先（候補の bundle ID の UserDefaults）----
+// 実行前に標準（960 x 640）へそろえ、終了時に元の値へ戻す。bundle ID が読めなければ、設定のケースは blocked にする。
+let infoPlistPath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Info.plist").path
+let bundleId = sh(["plutil", "-extract", "CFBundleIdentifier", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+let bundleIdOK = !bundleId.isEmpty && !bundleId.contains(" ") && bundleId.contains(".")
+func readDefault(_ k: String) -> String? { let r = sh(["defaults", "read", bundleId, k]); return r.0 == 0 ? r.1.trimmingCharacters(in: .whitespacesAndNewlines) : nil }
+let origDefaults: [String: String?] = bundleIdOK ? ["canvasWidthPx": readDefault("canvasWidthPx"), "canvasHeightPx": readDefault("canvasHeightPx")] : [:]
+if bundleIdOK { sh(["defaults", "write", bundleId, "canvasWidthPx", "-int", "960"]); sh(["defaults", "write", bundleId, "canvasHeightPx", "-int", "640"]) }
 let proc = Process(); proc.executableURL = URL(fileURLWithPath: buildExe); proc.arguments = ["\(work)/teal.png"]
 proc.standardOutput = FileHandle(forWritingAtPath: "/dev/null"); proc.standardError = FileHandle(forWritingAtPath: "\(work)/cand.log") ?? FileHandle.nullDevice
 try proc.run()
@@ -144,6 +152,8 @@ rec("C0 candidate identity", exePath == buildExe ? "pass" : "fail", "pid \(pid),
 
 /// 記録した PID だけを（起動時刻と実行ファイルを照合して）後片付けし、結果を書き出して終了する。
 func finish() -> Never {
+    // キャンバスサイズの設定を、実行前の状態へ戻す（ユーザーの設定を残さない）
+    if bundleIdOK { for (k, v) in origDefaults { if let v { sh(["defaults", "write", bundleId, k, "-int", v]) } else { sh(["defaults", "delete", bundleId, k]) } } }
     if let pf = prevFront, pf.processIdentifier != pid { pf.activate(options: []) }
     if let u = userPB { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u, forType: .string) }
     let psStart = sh(["ps", "-p", "\(pid)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -169,8 +179,8 @@ func finish() -> Never {
 let app = AXUIElementCreateApplication(pid)
 
 /// キャンバスの画面上の枠（左上原点）。Accessibility の「キャンバス」グループから実測する。
-func canvasFrame() -> CGRect? {
-    guard let g = collect(app, { axs($0, "AXRole") == "AXGroup" && axs($0, "AXDescription") == "キャンバス" }).first,
+func canvasFrame(_ root: AXUIElement? = nil) -> CGRect? {
+    guard let g = collect(root ?? app, { axs($0, "AXRole") == "AXGroup" && axs($0, "AXDescription") == "キャンバス" }).first,
           let pv = ax(g, "AXPosition"), let sv = ax(g, "AXSize") else { return nil }
     var p = CGPoint.zero, s = CGSize.zero
     AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &s)
@@ -221,8 +231,8 @@ func pt(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: C.x + x, y: C.y + y) }
 // baseline export
 guard let p0 = export(), let r0 = load(p0) else { rec("C5 copy path -> PNG", "fail", "no path on pasteboard / unreadable"); finish() }
 let newFile = !before.contains((p0 as NSString).lastPathComponent)
-rec("C5 copy button puts a valid PNG path on clipboard", (r0.pixelsWide == 1600 && r0.pixelsHigh == 1067 && newFile && p0.hasPrefix(outDir)) ? "pass" : "fail",
-    "path=\(p0) \(r0.pixelsWide)x\(r0.pixelsHigh) newFile=\(newFile)")
+rec("C5 copy button puts a valid PNG path on clipboard", (r0.pixelsWide == 960 && r0.pixelsHigh == 640 && newFile && p0.hasPrefix(outDir)) ? "pass" : "fail",
+    "path=\(p0) \(r0.pixelsWide)x\(r0.pixelsHigh) (expect 960x640 = canvas 480x320 pt x 2) newFile=\(newFile)")
 let base = (isTeal(at(r0, 360, 30)), isTeal(at(r0, 370, 100)), isTeal(at(r0, 370, 220)), at(r0, 240, 3))
 rec("C5b baseline export matches canvas (teal image, white letterbox)", (base.0 && base.1 && base.2 && base.3.r > 0.95 && base.3.a > 0.95) ? "pass" : "fail", "teal=\(base.0),\(base.1),\(base.2) letterbox=\(base.3)")
 
@@ -397,10 +407,11 @@ if let aw = axWindow(), let c0 = canvasFrame(), let w0 = axSize(aw) {
         canvasWidthPt = Double(c1.width)
         if let r = exportImg() {
             let penKept = isDark(darkest(r, 360, 30))
-            let aspectOK = abs((Double(r.pixelsWide) / Double(r.pixelsHigh)) / Double(c1.width / c1.height) - 1) < 0.01
+            let aspectOK = abs((Double(r.pixelsWide) / Double(max(1, r.pixelsHigh))) / Double(c1.width / c1.height) - 1) < 0.01
+            let exact2x = r.pixelsWide == Int(c1.width * 2) && r.pixelsHigh == Int(c1.height * 2)
             let corner = at(r, Double(c1.width) - 10, Double(c1.height) - 10)
-            rec("Z2 growing the window grows the canvas; content stays at the top-left", (penKept && aspectOK && corner.a > 0.95 && corner.r > 0.95 && corner.g > 0.95) ? "pass" : "fail",
-                "canvas \(Int(c0.width))x\(Int(c0.height)) -> \(Int(c1.width))x\(Int(c1.height)); export \(r.pixelsWide)x\(r.pixelsHigh); pen stroke kept at same position=\(penKept); aspect matches=\(aspectOK); new area is white=\(corner.r > 0.95)")
+            rec("Z2 growing the window grows the canvas; content stays at the top-left; export is exactly 2x the canvas", (penKept && aspectOK && exact2x && corner.a > 0.95 && corner.r > 0.95 && corner.g > 0.95) ? "pass" : "fail",
+                "canvas \(Int(c0.width))x\(Int(c0.height)) -> \(Int(c1.width))x\(Int(c1.height)); export \(r.pixelsWide)x\(r.pixelsHigh) (exactly 2x=\(exact2x)); pen stroke kept at same position=\(penKept); aspect matches=\(aspectOK); new area is white=\(corner.r > 0.95)")
         } else { rec("Z2", "blocked", "export failed") }
 
         // 最大化（ズームボタン）
@@ -424,6 +435,76 @@ if let aw = axWindow(), let c0 = canvasFrame(), let w0 = axSize(aw) {
     } else { rec("Z2 growing the window grows the canvas", "fail", "canvas did not grow after setting AXSize") }
     setAXSize(aw, w0.width, w0.height); _ = waitCanvas({ abs($0.width - c0.width) < 2 }); canvasWidthPt = 480
 } else { rec("Z1-Z4 window resize / maximize", "blocked", "could not read the window or canvas through Accessibility") }
+
+func isCanvas(_ w: Double, _ h: Double) -> (CGRect) -> Bool { { abs($0.width - w) < 1 && abs($0.height - h) < 1 } }
+// ---- キャンバスサイズの設定（A13）：メニューバーのメニュー・保存・書き出しのピクセル数 ----
+func statusMenuBar() -> AXUIElement? { (ax(app, "AXExtrasMenuBar") ?? ax(app, "AXMenuBar")).map { $0 as! AXUIElement } }
+func menuItem(_ prefix: String) -> AXUIElement? { statusMenuBar().flatMap { bar in collect(bar) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle").hasPrefix(prefix) }.first } }
+func menuMark(_ prefix: String) -> String { menuItem(prefix).map { axs($0, "AXMenuItemMarkChar") } ?? "?" }
+func pressMenu(_ prefix: String) -> Bool { guard let i = menuItem(prefix) else { return false }; return AXUIElementPerformAction(i, kAXPressAction as CFString) == .success }
+func dialogWindow() -> AXUIElement? { ((ax(app, "AXWindows") as? [AXUIElement]) ?? []).first { axs($0, "AXTitle") != "ShortNote" } }
+func axX(_ e: AXUIElement) -> CGFloat { guard let v = ax(e, "AXPosition") else { return 0 }; var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x }
+/// 「数値で指定…」のダイアログに値を入れて「設定」を押す。ダイアログは runModal なので、メニューを押す呼び出しは戻らない。タイムアウトを短くして先へ進む。
+func runCustomSize(_ w: String, _ h: String) -> Bool {
+    AXUIElementSetMessagingTimeout(app, 1.0); _ = pressMenu("数値で指定"); AXUIElementSetMessagingTimeout(app, 0)
+    var dlg: AXUIElement? = nil; _ = wait(4) { dlg = dialogWindow(); return dlg != nil }
+    guard let d = dlg else { return false }
+    let fields = collect(d) { axs($0, "AXRole") == "AXTextField" }.sorted { axX($0) < axX($1) }   // 左が幅、右が高さ
+    guard fields.count >= 2, let ok = collect(d, { axs($0, "AXRole") == "AXButton" && axs($0, "AXTitle") == "設定" }).first else { return false }
+    _ = AXUIElementSetAttributeValue(fields[0], "AXValue" as CFString, w as CFString)
+    _ = AXUIElementSetAttributeValue(fields[1], "AXValue" as CFString, h as CFString)
+    return AXUIElementPerformAction(ok, kAXPressAction as CFString) == .success
+}
+/// ステータスメニューを実際に開いて `body` を実行し、閉じる。閉じたメニューの表示は、開いたときに更新される（menuNeedsUpdate）ので、チェックの確認は開いて読む。
+/// メニューを押す呼び出しは、メニューが閉じるまで戻らない。タイムアウトを短くして先へ進む。
+func withMenuOpen<T>(_ body: () -> T) -> T {
+    guard let bar = statusMenuBar(), let item = (ax(bar, "AXChildren") as? [AXUIElement])?.first else { return body() }
+    AXUIElementSetMessagingTimeout(app, 1.0); _ = AXUIElementPerformAction(item, kAXPressAction as CFString); AXUIElementSetMessagingTimeout(app, 0)
+    usleep(600_000)
+    let result = body()
+    if let menu = (ax(item, "AXChildren") as? [AXUIElement])?.first { _ = AXUIElementPerformAction(menu, "AXCancel" as CFString) }
+    usleep(300_000)
+    return result
+}
+if !bundleIdOK {
+    rec("S1-S5 canvas size setting", "blocked", "could not read the candidate's bundle identifier from its Info.plist")
+} else {
+    let (s1ok, s1marks) = withMenuOpen { (menuMark("960 × 640") == "✓" && menuItem("1280 × 720") != nil, "960x640=\(menuMark("960 × 640")) 1280x720=\(menuMark("1280 × 720"))") }
+    rec("S1 the menu lists the presets and checks the saved size (960 x 640)", s1ok ? "pass" : "fail", "marks (menu opened): \(s1marks)")
+
+    if pressMenu("1280 × 720"), waitCanvas(isCanvas(640, 360)) != nil {
+        canvasWidthPt = 640
+        let r = exportImg()
+        let exact = r.map { $0.pixelsWide == 1280 && $0.pixelsHigh == 720 } ?? false
+        let saved = readDefault("canvasWidthPx") == "1280" && readDefault("canvasHeightPx") == "720"
+        let (marked, marks) = withMenuOpen { (menuMark("1280 × 720") == "✓" && menuMark("960 × 640") != "✓", "1280x720=\(menuMark("1280 × 720")) 960x640=\(menuMark("960 × 640"))") }
+        rec("S2 a preset sizes the canvas; the export is exactly that many pixels; the choice is saved and checked", (exact && saved && marked) ? "pass" : "fail",
+            "export \(r.map { "\($0.pixelsWide)x\($0.pixelsHigh)" } ?? "failed") (expect 1280x720); saved=\(saved); check mark moved=\(marked) [\(marks)]")
+    } else { rec("S2 a preset sizes the canvas", "fail", "the canvas did not become 640x360 pt after choosing 1280 x 720") }
+
+    if runCustomSize("1000", "700"), waitCanvas(isCanvas(500, 350)) != nil {
+        canvasWidthPt = 500
+        let r = exportImg()
+        let exact = r.map { $0.pixelsWide == 1000 && $0.pixelsHigh == 700 } ?? false
+        let saved = readDefault("canvasWidthPx") == "1000" && readDefault("canvasHeightPx") == "700"
+        let shown = withMenuOpen { menuItem("数値で指定").map { axs($0, "AXTitle").contains("1000 × 700") && axs($0, "AXMenuItemMarkChar") == "✓" } ?? false }
+        rec("S3 a typed size works: canvas, export pixels, saved value, and the menu shows it", (exact && saved && shown) ? "pass" : "fail",
+            "export \(r.map { "\($0.pixelsWide)x\($0.pixelsHigh)" } ?? "failed") (expect 1000x700); saved=\(saved); menu shows the number and a check=\(shown)")
+    } else { rec("S3 a typed size works", "blocked", "could not drive the custom-size dialog through Accessibility, or the canvas did not become 500x350 pt") }
+
+    if runCustomSize("20000", "700") {
+        var warn: AXUIElement? = nil; _ = wait(4) { warn = dialogWindow(); return warn != nil }
+        let warned = warn != nil
+        if let wn = warn, let okb = collect(wn, { axs($0, "AXRole") == "AXButton" }).first { _ = AXUIElementPerformAction(okb, kAXPressAction as CFString) }
+        usleep(600_000)
+        let unchanged = canvasFrame().map { abs($0.width - 500) < 1 && abs($0.height - 350) < 1 } ?? false
+        let savedSame = readDefault("canvasWidthPx") == "1000" && readDefault("canvasHeightPx") == "700"
+        rec("S4 a size that cannot fit is refused with a message and changes nothing", (warned && unchanged && savedSame) ? "pass" : "fail", "message shown=\(warned); canvas unchanged=\(unchanged); saved value unchanged=\(savedSame)")
+    } else { rec("S4 a size that cannot fit is refused", "blocked", "could not drive the custom-size dialog through Accessibility") }
+
+    if pressMenu("960 × 640"), waitCanvas(isCanvas(480, 320)) != nil { canvasWidthPt = 480 }
+    else { rec("S5 restoring the standard size", "fail", "the canvas did not return to 480x320 pt") }
+}
 
 // ---- ファイル選択（A05）----
 func sheets() -> [AXUIElement] { collect(app) { axs($0, "AXRole") == "AXSheet" } }
@@ -533,6 +614,8 @@ if keyGuard(pid, app) == nil {
 
 // ---- 引数なしの起動でもウィンドウが出る（SPEC 3.1「起動したらすぐ描ける」）----
 // 常駐インスタンスがあると転送されて終了するので、先に最初の候補を（起動時刻と実行ファイルを照合して）終了する。
+// 保存したサイズが次回の起動で使われることを見るため、ここで 1280 × 720 を選んでから再起動する。
+if bundleIdOK { _ = pressMenu("1280 × 720"); _ = waitCanvas(isCanvas(640, 360)) }
 let firstStart = sh(["ps", "-p", "\(pid)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
 if firstStart == startTime { kill(pid, SIGTERM); _ = wait(3) { !proc.isRunning } }
 if proc.isRunning {
@@ -546,6 +629,12 @@ if proc.isRunning {
     let shown = wait(6) { candWindow(pid3) != nil }
     let b3 = candWindow(pid3).map { bounds($0) } ?? .zero
     rec("C18 launch without arguments shows the panel", shown ? "pass" : "fail", "pid \(pid3) on-screen 'ShortNote' window within 6s: \(shown) bounds \(b3)")
+    if shown, bundleIdOK {
+        let el3 = AXUIElementCreateApplication(pid3)
+        var cf3: CGRect? = nil; _ = wait(5) { cf3 = canvasFrame(el3); return cf3 != nil }
+        let okSize = cf3.map { abs($0.width - 640) < 1 && abs($0.height - 360) < 1 } ?? false
+        rec("S6 the saved canvas size is applied on the next launch", okSize ? "pass" : "fail", "relaunched candidate canvas \(cf3.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unavailable") pt (expect 640x360 = 1280x720 px)")
+    }
     if sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == start3 { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
 }
 

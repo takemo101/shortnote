@@ -3,8 +3,9 @@
 app := justfile_directory() / "build/ShortNote.app"
 exe := app / "Contents/MacOS/ShortNote"
 
-# 書き出し先（アプリ固定）。ShortNote が持つ唯一の状態
+# 書き出し先（アプリ固定）と、設定の保存先（キャンバスのサイズだけを保存する）。ShortNote が持つ状態はこの 2 つ
 notes_dir := "/tmp/shortnote"
+bundle_id := "dev.takemo101.shortnote"
 
 default:
     @just --list
@@ -21,9 +22,11 @@ run: build
 try *image: build
     "{{exe}}" {{image}}
 
-# 書き出し済みの PNG を消して、初回の状態に戻す
+# 書き出し済みの PNG と、保存したキャンバスのサイズを消して、初回の状態に戻す
 reset-try:
     rm -rf '{{notes_dir}}'
+    -defaults delete {{bundle_id}} canvasWidthPx
+    -defaults delete {{bundle_id}} canvasHeightPx
 
 # build/ShortNote.dmg を作る（署名・公証は SIGN_IDENTITY / NOTARY_PROFILE を渡したときだけ。scripts/dmg.sh を参照）
 package:
