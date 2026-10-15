@@ -51,7 +51,7 @@ final class Toolbar: NSObject {
     }()
 
     private lazy var tools: NSSegmentedControl = {
-        let symbols = ["pencil.tip", "circle", "square", "textformat", "arrow.up.and.down.and.arrow.left.and.right", "line.diagonal"]
+        let symbols = ["pencil.tip", "line.diagonal", "circle", "square", "textformat", "arrow.up.and.down.and.arrow.left.and.right"]
         let control = NSSegmentedControl(
             images: symbols.map { NSImage(systemSymbolName: $0, accessibilityDescription: nil) ?? NSImage() },
             trackingMode: .selectOne, target: self, action: #selector(toolChanged(_:))
@@ -138,7 +138,7 @@ final class Toolbar: NSObject {
             let keys = center.chords(for: command).map(\.displayString).joined(separator: " / ")
             return keys.isEmpty ? title : "\(title)（\(keys)）"
         }
-        let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove), ("直線", .toolLine)]
+        let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("直線", .toolLine), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove)]
         for (i, entry) in toolCommands.enumerated() { tools.setToolTip(hint(entry.0, entry.1), forSegment: i) }
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)

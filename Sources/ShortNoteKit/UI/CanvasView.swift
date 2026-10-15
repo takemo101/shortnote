@@ -1,8 +1,8 @@
 import AppKit
 
-/// 描画ツール。`rawValue` は、ツールバーのセグメントの番号。
+/// 描画ツール。`rawValue` は、ツールバーのセグメントの番号（左から）。キーの番号（1〜6）とは別で、並びは SPEC §4 のとおり。
 enum Tool: Int, CaseIterable {
-    case pen, ellipse, rect, text, move, line
+    case pen, line, ellipse, rect, text, move
 }
 
 /// キャンバス。ポインタ入力を、`Document` の変更（履歴つき）につなぐ。描画は `CanvasRenderer`、文字入力は `InlineTextEditor` が行う。

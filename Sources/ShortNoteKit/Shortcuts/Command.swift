@@ -10,7 +10,7 @@ enum Command: String, CaseIterable, Codable, Hashable {
     case showPanel, hidePanel
     case undo, redo, clearCanvas
     case pasteImage, openImage, copyPath
-    case toolPen, toolEllipse, toolRect, toolText, toolMove, toolLine
+    case toolPen, toolLine, toolEllipse, toolRect, toolText, toolMove
     case brushSmaller, brushLarger
 
     var title: String {

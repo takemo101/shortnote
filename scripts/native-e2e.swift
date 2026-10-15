@@ -270,14 +270,16 @@ if drag(line(pt(280, 30), pt(440, 30)), pid: pid), let p = export(), let r = loa
 } else { rec("C6 pen stroke", "blocked", "pointer guard refused (hit target not candidate) or export failed") }
 
 // shapes
+/// ツールバーのセグメントの番号（左から）。SPEC §4 の並び：ペン／直線／円／四角／文字／移動。キーの番号（1〜6）とは別。
+enum Seg { static let pen = 0, line = 1, ellipse = 2, rect = 3, text = 4, move = 5 }
 func selectTool(_ i: Int) -> Bool { guard radios.count == 6, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
     return wait(2) { (ax(radios[i], "AXValue") as? NSNumber)?.intValue == 1 } }
-if selectTool(1), drag(line(pt(300, 60), pt(440, 140)), pid: pid), let p = export(), let r = load(p) {
+if selectTool(Seg.ellipse), drag(line(pt(300, 60), pt(440, 140)), pid: pid), let p = export(), let r = load(p) {
     let edge = darkest(r, 300, 100), mid = at(r, 370, 100)
     rec("C8 ellipse tool (drag sets size)", (isDark(edge) && isTeal(mid)) ? "pass" : "fail", "edge lum=\(edge.lum) interior teal=\(isTeal(mid))")
 } else { rec("C8 ellipse tool", "blocked", "tool select / drag guard failed") }
 var rectPath = ""
-if selectTool(2), drag(line(pt(300, 170), pt(440, 270)), pid: pid), let p = export(), let r = load(p) {
+if selectTool(Seg.rect), drag(line(pt(300, 170), pt(440, 270)), pid: pid), let p = export(), let r = load(p) {
     rectPath = p
     let edge = darkest(r, 300, 220), mid = at(r, 370, 220)
     rec("C9 rectangle tool (drag sets size)", (isDark(edge) && isTeal(mid)) ? "pass" : "fail", "edge lum=\(edge.lum) interior teal=\(isTeal(mid))")
@@ -328,7 +330,7 @@ func exportImg() -> NSBitmapImageRep? { export().flatMap { load($0) } }
 if let why = keyGuard(pid, app) {
     for id in ["T1 text editor opens", "T2 typed text committed (Return)", "T3 Esc cancels editing without hiding panel"] { rec(id, "blocked", "keyboard guard: \(why)") }
 } else {
-    if selectTool(3), click(pt(20, 20)) {
+    if selectTool(Seg.text), click(pt(20, 20)) {
         let fo = ax(app, "AXFocusedUIElement").map { axs($0 as! AXUIElement, "AXRole") } ?? "<none>"
         rec("T1 text tool opens inline editor on click", editorAreas().count == 1 ? "pass" : "fail", "AXTextArea count=\(editorAreas().count) focusedRole=\(fo) frontmostIsCandidate=\(NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)")
         for kc: CGKeyCode in [0, 11, 8] { key(kc, []) }   // real keycodes a b c
@@ -344,7 +346,7 @@ if let why = keyGuard(pid, app) {
                 "editor value='\(typed)' editorClosed=\(closed) darkPx in text box=\(n) (need>150) darkPx left of click=\(left)")
         } else { rec("T2", "blocked", "export failed") }
     } else { rec("T1 text tool", "blocked", "tool select / click guard failed") }
-    if selectTool(3), keyGuard(pid, app) == nil, click(pt(20, 70)) {
+    if selectTool(Seg.text), keyGuard(pid, app) == nil, click(pt(20, 70)) {
         typeUnicode("ZZZ"); key(53, [])
         let closed = wait(2) { editorAreas().isEmpty }
         if let r = exportImg() {
@@ -399,7 +401,7 @@ if sh(["ps", "-p", "\(srcPid)", "-o", "lstart="]).1.trimmingCharacters(in: .whit
 } else { rec("D1 drag & drop", "blocked", "scripts/native-dragsrc.swift did not compile (run from the repository root)") }
 
 // ---- 移動ツール / Undo ----
-if !dragsrcOK { rec("M1 move tool", "blocked", "needs the D1 image (drag source did not compile)") } else if selectTool(4), drag(line(pt(200, 200), pt(260, 170)), pid: pid), let r = exportImg() {
+if !dragsrcOK { rec("M1 move tool", "blocked", "needs the D1 image (drag source did not compile)") } else if selectTool(Seg.move), drag(line(pt(200, 200), pt(260, 170)), pid: pid), let r = exportImg() {
     let moved = at(r, 400, 100), old = at(r, 60, 290)
     rec("M1 move tool drags topmost image", (isMag(moved) && !isMag(old)) ? "pass" : "fail", "(400,100) magenta=\(isMag(moved)) (60,290) magenta=\(isMag(old))")
 } else { rec("M1 move tool", "blocked", "tool select / pointer guard failed") }
@@ -670,10 +672,10 @@ func keyCodeProducing(_ ch: String) -> CGKeyCode? {
 if let why = keyGuard(pid, app) {
     for id in ["K1 keys 1-5 select tools", "K2 [ ] change brush size", "K3 copy-path key", "K4-K9 reassigning shortcuts"] { rec(id, "blocked", "keyboard guard: \(why)") }
 } else {
-    let toolKeys: [(CGKeyCode, Int)] = [(20, 2), (21, 3), (23, 4), (19, 1), (18, 0)]
+    let toolKeys: [(CGKeyCode, Int)] = [(20, Seg.rect), (21, Seg.text), (23, Seg.move), (19, Seg.ellipse), (18, Seg.pen), (22, Seg.line)]   // キー 3, 4, 5, 2, 1, 6
     var seen: [Int?] = []
     for (code, _) in toolKeys { key(code, []); seen.append(radioSelected()) }
-    rec("K1 default keys 1-5 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1 the selected segment was \(seen) (expect [2, 3, 4, 1, 0])")
+    rec("K1 default keys 1-6 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1,6 the selected segment was \(seen) (expect \(toolKeys.map { $0.1 }); the segments are pen, line, ellipse, rect, text, move)")
 
     if let smallerKey = keyCodeProducing("["), let largerKey = keyCodeProducing("]") {
         let v0 = sliderValue(); key(largerKey, []); let v1 = sliderValue(); key(smallerKey, []); let v2 = sliderValue()
@@ -707,9 +709,9 @@ if let why = keyGuard(pid, app) {
         let msg5 = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
         closeShortcutsAndShowPanel()
         var effect = false, oldDead = false
-        if keyGuard(pid, app) == nil, selectTool(2) {
-            key(35, []); effect = radioSelected() == 0          // P でペンになる
-            _ = selectTool(2); key(18, []); oldDead = radioSelected() == 2   // 1 では、もう変わらない
+        if keyGuard(pid, app) == nil, selectTool(Seg.rect) {
+            key(35, []); effect = radioSelected() == Seg.pen          // P でペンになる
+            _ = selectTool(Seg.rect); key(18, []); oldDead = radioSelected() == Seg.rect   // 1 では、もう変わらない
         }
         rec("K5 a reassigned key works, the old key stops, and the change is saved", (changed && effect && oldDead && (saved || !bundleIdOK)) ? "pass" : "fail",
             "window shows P=\(changed) P selects pen=\(effect) old '1' ignored=\(oldDead) saved=\(saved) message='\(msg5)'")
@@ -753,7 +755,7 @@ if let why = keyGuard(pid, app) {
             let cleared = bundleIdOK ? wait(2) { readDefault("keyBindings") == nil } : true
             closeShortcutsAndShowPanel()
             var works = false
-            if keyGuard(pid, app) == nil, selectTool(2) { key(18, []); works = radioSelected() == 0 }
+            if keyGuard(pid, app) == nil, selectTool(Seg.rect) { key(18, []); works = radioSelected() == Seg.pen }
             rec("K9 reset-all restores the defaults and removes the saved overrides", (pressed && back && cleared && works) ? "pass" : "fail", "pressed=\(pressed) window shows 1=\(back) saved value removed=\(cleared) '1' selects pen again=\(works)")
         } else { rec("K6-K9 conflict / reserved / cancel / reset-all", "blocked", "could not reopen the shortcuts window") }
     } else { rec("K4-K9 shortcuts window", "blocked", "the status menu item did not open a focused 'ショートカット' window") }
@@ -767,7 +769,7 @@ if let why = keyGuard(pid, app) {
     let W = Double(cf.width), H = Double(cf.height)
     canvasWidthPt = W
     let y = H - 18   // 背景（下半分は緑）の上に、黒い線を引く
-    _ = selectTool(0)
+    _ = selectTool(Seg.pen)
     /// (線が見える, 背景が見える)。背景は、貼り付けた画像の外側（左端）の、背景画像の左上（赤）で見る。
     func state() -> (stroke: Bool, background: Bool)? {
         guard let r = exportImg() else { return nil }
@@ -824,7 +826,7 @@ func darkHeight(_ r: NSBitmapImageRep, _ x0: Double, _ y0: Double, _ x1: Double,
 }
 /// 文字ツールで (x, y) に "HHH" を入れて Return で確定し、書き出しの (y0, y1) の範囲に出た文字の高さ（pt）を返す。
 func typeAndMeasure(_ x: Double, _ y: Double, rows y0: Double, _ y1: Double) -> Double? {
-    guard selectTool(3) else { print("   typeAndMeasure: selectTool failed"); return nil }
+    guard selectTool(Seg.text) else { print("   typeAndMeasure: selectTool failed"); return nil }
     guard click(pt(x, y)) else { print("   typeAndMeasure: click refused"); return nil }
     guard wait(2, { editorAreas().count == 1 }), let ta = editorAreas().first else { print("   typeAndMeasure: editor did not open (count=\(editorAreas().count))"); return nil }
     _ = AXUIElementSetAttributeValue(ta, "AXValue" as CFString, "HHH" as CFString)
@@ -848,7 +850,7 @@ if let why = keyGuard(pid, app) {
 
     // ブラシを 4 -> 24 にして（] を 10 回）、文字サイズは 18 pt のまま。連動していたなら、12 + 24 * 1.5 = 48 pt になる。
     var brushNote = "no ] keycode"
-    if let bracket = keyCodeProducing("]"), chooseTextSize("18 pt"), selectTool(0) {
+    if let bracket = keyCodeProducing("]"), chooseTextSize("18 pt"), selectTool(Seg.pen) {
         for _ in 0..<10 { key(bracket, []); usleep(60_000) }
         brushNote = "brush slider = \(sliderValue().map { String(format: "%.0f", $0) } ?? "?")"
         let h = typeAndMeasure(120, 190, rows: 182, 300)
@@ -858,7 +860,7 @@ if let why = keyGuard(pid, app) {
     } else { rec(textSizeIds[2], "blocked", "could not set the brush with the ] key, or select 18 pt / the pen tool") }
 
     // 入力中に変える：入力欄（AXTextArea）の高さが、新しい大きさの 1 行分以上になる。
-    if selectTool(3), chooseTextSize("18 pt"), click(pt(300, 40)), wait(2, { editorAreas().count == 1 }), let ta = editorAreas().first {
+    if selectTool(Seg.text), chooseTextSize("18 pt"), click(pt(300, 40)), wait(2, { editorAreas().count == 1 }), let ta = editorAreas().first {
         _ = AXUIElementSetAttributeValue(ta, "AXValue" as CFString, "H" as CFString)
         let before = axSize(ta)?.height ?? 0
         let changed = chooseTextSize("48 pt")
@@ -881,7 +883,7 @@ if let why = keyGuard(pid, app) {
     key(40, .maskCommand)   // 描いたものを消す
 
     // B3：四角を、右の縁の外（余白）までドラッグする。右の辺は、キャンバスの縁にある（外の余白では、書き出しに出ない）。
-    if selectTool(2), drag(line(pt(300, 20), pt(W + 8, 50)), pid: pid), let r = exportImg() {
+    if selectTool(Seg.rect), drag(line(pt(300, 20), pt(W + 8, 50)), pid: pid), let r = exportImg() {
         let edge = darkest(r, W - 1, 35)
         rec(edgeIds[2], isDark(edge) ? "pass" : "fail", "dark pixel at the right edge (x=\(Int(W) - 1), y=35, between the top and bottom sides): lum=\(String(format: "%.2f", edge.lum)); the pointer ended 8 pt outside the canvas")
     } else { rec(edgeIds[2], "blocked", "tool select / drag guard / export failed") }
@@ -889,8 +891,8 @@ if let why = keyGuard(pid, app) {
 
     // B1・B2：キャンバスの上の縁に近い四角を、上へ（ツールバーの帯まで）動かす。
     var rectDrawn = false
-    if selectTool(2), drag(line(pt(100, 12), pt(180, 42)), pid: pid), let r0 = exportImg() { rectDrawn = countDark(r0, 90, 0, 190, 50) > 200 }
-    if rectDrawn, selectTool(4), drag(line(pt(140, 27), pt(140, -30)), pid: pid), let r1 = exportImg() {
+    if selectTool(Seg.rect), drag(line(pt(100, 12), pt(180, 42)), pid: pid), let r0 = exportImg() { rectDrawn = countDark(r0, 90, 0, 190, 50) > 200 }
+    if rectDrawn, selectTool(Seg.move), drag(line(pt(140, 27), pt(140, -30)), pid: pid), let r1 = exportImg() {
         let kept = countDark(r1, 90, 0, 190, 40)
         rec(edgeIds[0], kept > 200 ? "pass" : "fail", "dark pixels of the moved rectangle left inside the canvas (x 90-190, y 0-40) = \(kept) (need > 200; 0 means it was carried out of the canvas and cannot be seen or grabbed)")
         // 戻す：キャンバスの上の縁（y=3）から下へ。要素が縁に残っていれば、掴めて、100 pt 下がる（左の辺が x=100、y=85〜115）。
@@ -907,8 +909,8 @@ if let why = keyGuard(pid, app) {
     // B4：楕円の外接する範囲の、何も描かれていない左上の角（外側）を掴んで、右下の外（余白・下の帯）まで動かす。
     // 掴んだ点だけをキャンバスの中に残しても、楕円の輪は、角から遠いので、完全に外へ出てしまう。掴める範囲が残っていれば、また掴んで戻せる。
     let H = Double(cf.height)
-    if selectTool(1), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
-       selectTool(4), drag(line(pt(103, 103), pt(W + 8, H + 20)), pid: pid) {
+    if selectTool(Seg.ellipse), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
+       selectTool(Seg.move), drag(line(pt(103, 103), pt(W + 8, H + 20)), pid: pid) {
         // 掴める範囲（外接する範囲＋4 pt）の、16 pt が、右下の角に残る。そこ（W-10, H-10）を掴んで、左上へ戻す。
         let back = (dx: -300.0, dy: -200.0)
         let moved = drag(line(pt(W - 10, H - 10), pt(W - 10 + back.dx, H - 10 + back.dy)), pid: pid)
@@ -922,7 +924,7 @@ if let why = keyGuard(pid, app) {
 } else { for id in edgeIds { rec(id, "blocked", "canvas frame unavailable") } }
 
 // ---- 直線ツール（A19）：実キー 6 で選び、斜めの直線を引き、動かし、取り消す。大きさのない直線は足さない ----
-let lineIds = ["N1 key 6 selects the line tool (the 6th segment)", "N2 a diagonal line is drawn from the start to the end of the drag", "N3 a click without a drag adds no line (Cmd+Z removes the line before it, Cmd+Shift+Z brings it back)", "N4 the move tool carries the line; Cmd+Z puts it back"]
+let lineIds = ["N1 key 6 selects the line tool (the 2nd segment, next to the pen)", "N2 a diagonal line is drawn from the start to the end of the drag", "N3 a click without a drag adds no line (Cmd+Z removes the line before it, Cmd+Shift+Z brings it back)", "N4 the move tool carries the line; Cmd+Z puts it back"]
 if let why = keyGuard(pid, app) {
     for id in lineIds { rec(id, "blocked", "keyboard guard: \(why)") }
 } else if let cf = canvasFrame() {
@@ -930,8 +932,8 @@ if let why = keyGuard(pid, app) {
     func darkAt(_ x: Double, _ y: Double) -> Bool? { exportImg().map { isDark(darkest($0, x, y)) } }
     key(40, .maskCommand)   // 描いたものを消す
     key(22, [])             // 6：直線
-    let selected = wait(2) { radioSelected() == 5 }
-    rec(lineIds[0], selected ? "pass" : "fail", "selected tool segment after pressing 6 = \(radioSelected().map(String.init) ?? "none") (expect 5)")
+    let selected = wait(2) { radioSelected() == Seg.line }
+    rec(lineIds[0], selected ? "pass" : "fail", "selected tool segment after pressing 6 = \(radioSelected().map(String.init) ?? "none") (expect \(Seg.line): the 2nd segment, next to the pen)")
 
     // 始点 (120,100)、終点 (300,200)。中点は (210,150)。線から離れた、範囲の隅 (300,100)・(120,200) には、何も無い。
     if selected, drag(line(pt(120, 100), pt(300, 200)), pid: pid) {
@@ -939,13 +941,13 @@ if let why = keyGuard(pid, app) {
         rec(lineIds[1], (mid == true && cornerA == false && cornerB == false) ? "pass" : "fail", "dark at the midpoint (210,150)=\(String(describing: mid)); at the empty corners (300,100)=\(String(describing: cornerA)), (120,200)=\(String(describing: cornerB))")
 
         // 対照：ペンのクリックは、点を足す（クリックが届くこと、Cmd+Z で消えることの確認）。届いていなければ、以下の「足されない」は、何も見ていないことになる。
-        let penClick = selectTool(0) && click(pt(50, 250))
+        let penClick = selectTool(Seg.pen) && click(pt(50, 250))
         let dotThere = darkAt(50, 250)
         key(6, .maskCommand)
         let dotGone = darkAt(50, 250)
         let control = penClick && dotThere == true && dotGone == false
         // 大きさのないドラッグ（クリック）。線が足されていれば、Cmd+Z で消えるのは、クリックの分で、本物の線が残る。
-        let clicked = selectTool(5) && click(pt(50, 250))
+        let clicked = selectTool(Seg.line) && click(pt(50, 250))
         let nothingDrawn = darkAt(50, 250)
         key(6, .maskCommand)
         let afterUndo = darkAt(210, 150)
@@ -954,7 +956,7 @@ if let why = keyGuard(pid, app) {
         rec(lineIds[2], (control && clicked && nothingDrawn == false && afterUndo == false && afterRedo == true) ? "pass" : "fail", "control (pen click): dot there=\(String(describing: dotThere)), gone after Cmd+Z=\(String(describing: dotGone.map { !$0 })); line-tool click delivered=\(clicked), nothing drawn at the click=\(String(describing: nothingDrawn.map { !$0 })); after Cmd+Z the line is gone=\(String(describing: afterUndo.map { !$0 })); after Cmd+Shift+Z it is back=\(String(describing: afterRedo))")
 
         // 移動：中点を 60 pt 下へ。線は (120,160)〜(300,260) になる。
-        if selectTool(4), drag(line(pt(210, 150), pt(210, 210)), pid: pid) {
+        if selectTool(Seg.move), drag(line(pt(210, 150), pt(210, 210)), pid: pid) {
             let movedMid = darkAt(210, 210), oldMid = darkAt(210, 150)
             key(6, .maskCommand)
             let backMid = darkAt(210, 150), movedGone = darkAt(210, 210)
