@@ -33,7 +33,7 @@
 
 ## ダウンロード
 
-[Releases](https://github.com/takemo101/shortnote/releases) から、`ShortNote-X.Y.Z.dmg` をダウンロードできます（タグ `vX.Y.Z` のときに、GitHub Actions が作ります。macOS 13 以降、Apple Silicon と Intel の両対応）。DMG を開いて、ShortNote を「Applications」へドラッグしてください。
+リリースは、タグ `vX.Y.Z` のときに GitHub Actions が作ります。公開されたリリースは [Releases](https://github.com/takemo101/shortnote/releases) に並び、`ShortNote-X.Y.Z.dmg` をダウンロードできます（macOS 13 以降、Apple Silicon と Intel の両対応）。DMG を開いて、ShortNote を「Applications」へドラッグしてください。
 
 署名が ad-hoc（Developer ID の署名・公証なし）のため、初回は macOS の Gatekeeper に止められます。右クリック →「開く」、または `xattr -dr com.apple.quarantine /Applications/ShortNote.app` で開けます。
 

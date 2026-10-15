@@ -1,7 +1,7 @@
 # リリース：タグ vX.Y.Z の push で、DMG をビルドして GitHub Release に添付する（SPEC §10.1）。
 #
-#   git tag v1.0.0 && git push origin v1.0.0      タグの commit が main に含まれているときだけ、Release を作る
-#   手動実行（Actions タブ → Run workflow）        Release は作らない。DMG をアーティファクトに残すだけ（ドライラン）
+#   git tag v1.0.0 <main の commit> && git push origin v1.0.0   タグの commit が main に含まれているときだけ、Release を作る
+#   手動実行（Actions タブ → Run workflow。タグを選んでも同じ）  Release は作らない。DMG をアーティファクトに残すだけ（ドライラン）
 #   Pull Request（リリースに関わるファイルを変えたとき）  同じドライラン。ワークフロー自体は、マージ前に、この経路で検証できる
 # 署名は ad-hoc のまま。署名・公証の鍵や認証情報（secrets）は、このワークフローに渡さない。
 # 権限は最小：ビルドとテストは contents: read、Release の作成だけ contents: write。
@@ -45,11 +45,12 @@ jobs:
       - name: Work out the version and the file name
         id: meta
         env:
+          EVENT_NAME: ${{ github.event_name }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}   # PR は、一時的なマージ commit ではなく、PR の commit をファイル名に使う
         run: |
-          if [ "${REF_TYPE}" = "tag" ]; then
+          if [ "${EVENT_NAME}" = "push" ] && [ "${REF_TYPE}" = "tag" ]; then
             if ! [[ "${REF_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
               echo "タグ ${REF_NAME} は vX.Y.Z の形ではありません" >&2
               exit 1
@@ -57,7 +58,7 @@ jobs:
             version="${REF_NAME#v}"
             asset="ShortNote-${version}.dmg"
           else
-            # ドライラン。アプリの版は 0.0.0、ファイル名には commit を入れて、リリースと見分ける。
+            # ドライラン（手動実行・Pull Request。手動実行をタグの上で起動しても、ここ）。アプリの版は 0.0.0、ファイル名には commit を入れて、リリースと見分ける。
             version="0.0.0"
             asset="ShortNote-dev-${SHA:0:7}.dmg"
           fi
@@ -66,7 +67,7 @@ jobs:
           echo "version=${version} asset=${asset}"
 
       - name: The tagged commit must be on main
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         env:
           SHA: ${{ github.sha }}
         run: |
@@ -114,7 +115,7 @@ jobs:
   release:
     name: Publish the GitHub Release
     needs: build
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref_type == 'tag'   # 手動実行は、タグの上で起動しても、Release を作らない
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -152,5 +153,5 @@ jobs:
             --repo "${REPO}" \
             --verify-tag \
             --title "ShortNote ${VERSION}" \
-            --notes-file notes.md \
+            --notes "$(cat notes.md)" \
             --generate-notes
