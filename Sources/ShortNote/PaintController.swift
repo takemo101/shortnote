@@ -1,12 +1,14 @@
 import AppKit
+import UniformTypeIdentifiers
 
-/// Esc で隠す、Cmd/Ctrl+Z・Shift+Z で Undo/Redo、Cmd+V で画像貼り付け。
+/// Esc で隠す、Cmd/Ctrl+Z・Shift+Z で Undo/Redo、Cmd+V で画像貼り付け、Cmd+O で画像ファイルの選択。
 /// メニューバーを持たないアプリなので、フォーカス位置に関わらず効かせるため sendEvent で拾う。
 /// 文字入力中は Esc=入力取り消し、Cmd+V/C/X/A/Z は文字入力欄に渡す。
 final class PaintPanel: NSPanel {
     var onUndo: (() -> Void)?
     var onRedo: (() -> Void)?
     var onPaste: (() -> Void)?
+    var onOpen: (() -> Void)?
     var onCancelEdit: (() -> Void)?
     var isEditingText: () -> Bool = { false }
 
@@ -35,6 +37,9 @@ final class PaintPanel: NSPanel {
                 case "v" where flags.contains(.command):
                     if editing { NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) } else { onPaste?() }
                     return
+                case "o" where flags.contains(.command):
+                    if !editing { onOpen?() }
+                    return
                 case "c" where flags.contains(.command) && editing:
                     NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self)
                     return
@@ -57,15 +62,15 @@ final class PaintController: NSObject {
     static let outputDirectory = URL(fileURLWithPath: "/tmp/shortnote", isDirectory: true)
 
     private let panel: PaintPanel
-    private let canvas = CanvasView(frame: NSRect(origin: .zero, size: CanvasView.canvasSize))
+    private let canvas = CanvasView(frame: NSRect(origin: .zero, size: CanvasView.minimumSize))
     private let copyButton = NSButton(title: "パスをコピー", target: nil, action: nil)
     private var cachedURL: URL?
     private var positioned = false
 
     override init() {
         panel = PaintPanel(
-            contentRect: NSRect(origin: .zero, size: CanvasView.canvasSize),
-            styleMask: [.titled, .closable, .utilityWindow, .nonactivatingPanel],
+            contentRect: NSRect(origin: .zero, size: CanvasView.minimumSize),
+            styleMask: [.titled, .closable, .resizable, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -85,12 +90,17 @@ final class PaintController: NSObject {
         panel.onUndo = { [weak self] in self?.canvas.undo() }
         panel.onRedo = { [weak self] in self?.canvas.redo() }
         panel.onPaste = { [weak self] in self?.canvas.pasteImages() }
+        panel.onOpen = { [weak self] in self?.pickImages() }
         panel.onCancelEdit = { [weak self] in self?.canvas.cancelEditing() }
         panel.isEditingText = { [weak self] in self?.canvas.isEditing ?? false }
 
         canvas.onChange = { [weak self] in self?.cachedURL = nil }
-        canvas.widthAnchor.constraint(equalToConstant: CanvasView.canvasSize.width).isActive = true
-        canvas.heightAnchor.constraint(equalToConstant: CanvasView.canvasSize.height).isActive = true
+        for axis in [NSLayoutConstraint.Orientation.horizontal, .vertical] {
+            canvas.setContentHuggingPriority(.defaultLow, for: axis)
+            canvas.setContentCompressionResistancePriority(.defaultLow, for: axis)
+        }
+        canvas.widthAnchor.constraint(greaterThanOrEqualToConstant: CanvasView.minimumSize.width).isActive = true
+        canvas.heightAnchor.constraint(greaterThanOrEqualToConstant: CanvasView.minimumSize.height).isActive = true
 
         // ツール切替
         let tools = NSSegmentedControl(
@@ -124,7 +134,14 @@ final class PaintController: NSObject {
         let transparent = NSButton(checkboxWithTitle: "背景透過", target: self, action: #selector(transparentChanged(_:)))
         transparent.refusesFirstResponder = true
 
-        let top = NSStackView(views: [tools, well, slider, transparent])
+        // 画像を追加（ファイル選択）
+        let pick = NSButton(image: NSImage(systemSymbolName: "photo.badge.plus", accessibilityDescription: "画像を追加") ?? NSImage(), target: self, action: #selector(pickImages))
+        pick.bezelStyle = .rounded
+        pick.toolTip = "画像を追加…（⌘O）"
+        pick.setAccessibilityLabel("画像を追加")
+        pick.refusesFirstResponder = true
+
+        let top = NSStackView(views: [tools, pick, well, slider, transparent])
         top.orientation = .horizontal
         top.spacing = 12
         top.alignment = .centerY
@@ -143,17 +160,33 @@ final class PaintController: NSObject {
         let bottom = NSStackView(views: [handle, spacer, copyButton])
         bottom.orientation = .horizontal
         bottom.alignment = .centerY
-        bottom.translatesAutoresizingMaskIntoConstraints = false
 
-        let root = NSStackView(views: [top, canvas, bottom])
-        root.orientation = .vertical
-        root.alignment = .leading
-        root.spacing = 8
-        root.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 12, right: 12)
-        bottom.widthAnchor.constraint(equalToConstant: CanvasView.canvasSize.width).isActive = true
+        // キャンバスだけが、ウィンドウの大きさに合わせて伸び縮みする（上下の帯は固定の高さ）。
+        let root = NSView()
+        for v in [top, canvas, bottom] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            root.addSubview(v)
+        }
+        let side: CGFloat = 12, gap: CGFloat = 8
+        NSLayoutConstraint.activate([
+            top.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
+            top.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+            top.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -side),
+
+            canvas.topAnchor.constraint(equalTo: top.bottomAnchor, constant: gap),
+            canvas.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+            canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+
+            bottom.topAnchor.constraint(equalTo: canvas.bottomAnchor, constant: gap),
+            bottom.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+            bottom.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+            bottom.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+        ])
 
         panel.contentView = root
-        panel.setContentSize(root.fittingSize)
+        let fitting = root.fittingSize
+        panel.setContentSize(fitting)
+        panel.contentMinSize = fitting
     }
 
     @objc private func toolChanged(_ sender: NSSegmentedControl) {
@@ -170,6 +203,21 @@ final class PaintController: NSObject {
 
     @objc private func transparentChanged(_ sender: NSButton) {
         canvas.transparent = sender.state == .on
+    }
+
+    /// 画像ファイルを選んで、キャンバスの中央に追加する（貼り付け・ドロップと同じ扱い）。
+    @objc private func pickImages() {
+        canvas.commitEditing()
+        let open = NSOpenPanel()
+        open.allowedContentTypes = [.image]
+        open.allowsMultipleSelection = true
+        open.canChooseDirectories = false
+        open.message = "キャンバスに追加する画像を選んでください"
+        NSApp.activate(ignoringOtherApps: true)
+        open.beginSheetModal(for: panel) { [weak self] response in
+            guard response == .OK else { return }
+            self?.canvas.addImages(at: open.urls)
+        }
     }
 
     @objc private func copyPath() {
@@ -198,7 +246,8 @@ final class PaintController: NSObject {
 
     @discardableResult
     func load(_ url: URL) -> Bool {
-        canvas.loadImage(at: url)
+        panel.contentView?.layoutSubtreeIfNeeded()  // 背景画像の配置は、読み込み時のキャンバスの大きさで決まる
+        return canvas.loadImage(at: url)
     }
 
     /// 変更がなければ前回書き出した PNG をそのまま返す。
