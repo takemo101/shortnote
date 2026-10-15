@@ -38,7 +38,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       asset: ${{ steps.meta.outputs.asset }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # タグの commit が main に含まれるかを調べるため、全部の履歴を取る
 
@@ -113,12 +113,32 @@ jobs:
           cat "dist/${ASSET}.sha256"
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.asset }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+
+  handoff:
+    name: Check the artifact hand-off (no release)
+    needs: build
+    if: github.event_name != 'push' || github.ref_type != 'tag'   # Release を作らない実行だけ。Release のジョブと同じ手順で、受け渡しを確かめる
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.asset }}
+          path: dist
+
+      - name: Check the downloaded files
+        env:
+          ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          cd dist
+          ls -l
+          sha256sum -c "${ASSET}.sha256"
 
   release:
     name: Publish the GitHub Release
@@ -129,10 +149,18 @@ jobs:
     permissions:
       contents: write   # Release の作成だけに、書き込みを許す
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.asset }}
           path: dist
+
+      - name: Check the downloaded files
+        env:
+          ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          cd dist
+          ls -l
+          sha256sum -c "${ASSET}.sha256"
 
       - name: Create the release
         env:

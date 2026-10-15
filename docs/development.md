@@ -134,7 +134,7 @@ Git の書込みは `but` を使う。統合先は `main`、GitButler target は
 
 1. **版を上げる**：`Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` を、リリースする `X.Y.Z` にして、PR で `main` に入れる（版の信頼できる元は、ソースの `Info.plist`。タグと一致しないと、ワークフローが Release を作らずに失敗する）。
 2. **タグを作る**：版を入れた `main` の commit に、タグ `vX.Y.Z` を作る。ユーザーが自分の端末で `git tag vX.Y.Z <main の commit> && git push origin vX.Y.Z` としてもよい。エージェントが依頼を受けて作るときは、`but` にタグの操作がなく、raw Git で書き込めないので、GitHub の API でサーバー側に作る：`gh api repos/takemo101/shortnote/git/refs -f ref=refs/tags/vX.Y.Z -f sha=<main の commit の SHA>`。軽量タグで、push のイベントが通常どおり発火する。
-3. ワークフローが、単体テスト → `VERSION=X.Y.Z ./scripts/dmg.sh` → `./scripts/verify-dmg.sh`（整合・中身・アイコン・版・Universal・署名）→ `ShortNote-X.Y.Z.dmg` と `.sha256` の作成、の順に進み、通ったときだけ Release を作る。Release のノートには、インストールと Gatekeeper の回避手順を付け、変更点は GitHub が生成する。
-4. タグを打たずに確かめたいときは、Actions タブ → release → Run workflow（`workflow_dispatch`。ワークフローが `main` に入ってから使える。タグを選んで起動しても、Release は作らない）。DMG をアーティファクト（14 日）に残す。リリースに関わるファイル（ワークフロー、ビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request でも、同じドライランが自動で走る（マージ前に、ワークフロー自体を検証できる）。
+3. ワークフローが、単体テスト → `VERSION=X.Y.Z ./scripts/dmg.sh` → `./scripts/verify-dmg.sh`（整合・中身・アイコン・版・Universal・署名）→ `ShortNote-X.Y.Z.dmg` と `.sha256` の作成、の順に進む。次に、公開のジョブが、ダウンロードしたファイルの SHA-256 を照合し、通ったときだけ Release を作る。Release のノートには、インストールと Gatekeeper の回避手順を付け、変更点は GitHub が生成する。
+4. タグを打たずに確かめたいときは、Actions タブ → release → Run workflow（`workflow_dispatch`。ワークフローが `main` に入ってから使える。タグを選んで起動しても、Release は作らない）。DMG をアーティファクト（14 日）に残し、`handoff` ジョブが、Release のジョブと同じ手順で、アーティファクトをダウンロードして SHA-256 を照合する。リリースに関わるファイル（ワークフロー、ビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request でも、同じドライランが自動で走る（マージ前に、ワークフロー自体を検証できる）。
 
 署名は ad-hoc のまま。署名・公証の鍵や認証情報を、ワークフローに渡さない。ローカルで同じ検査をするには、`VERSION=X.Y.Z ./scripts/dmg.sh && ./scripts/verify-dmg.sh build/ShortNote.dmg X.Y.Z`。
