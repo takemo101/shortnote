@@ -7,3 +7,6 @@ build/
 .sksync/
 sksync.config.json
 sksync-lock.json
+
+# mikan のローカル作業状態
+/.mikan/

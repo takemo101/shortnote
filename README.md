@@ -43,6 +43,8 @@ xattr -dr com.apple.quarantine /Applications/ShortNote.app
 
 Developer ID で署名・公証する場合は、スクリプト冒頭のコメントを参照してください。
 
-## 仕様
+## 仕様・開発
 
-[menubar-paint-spec.md](menubar-paint-spec.md)
+- [SPEC.md](SPEC.md)：仕様と受け入れ条件（唯一の正本）
+- [AGENTS.md](AGENTS.md)：開発規約（mikan・GitButler・検証の運用）
+- [docs/](docs/README.md)：開発手順・構成説明・検証手順と記録
