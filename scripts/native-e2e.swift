@@ -45,18 +45,20 @@ func px(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) -> Px {
     let c = rep.colorAt(x: x, y: y)!.usingColorSpace(.deviceRGB)!
     return Px(r: c.redComponent, g: c.greenComponent, b: c.blueComponent, a: c.alphaComponent)
 }
+/// 書き出し PNG の画素位置を、キャンバスのポイント座標に換算するための現在のキャンバス幅。リサイズのケースでだけ変える。
+var canvasWidthPt: Double = 480
 /// canvas point (pt, top-left origin) -> darkest pixel in a 5x5 neighbourhood of the export
 func darkest(_ rep: NSBitmapImageRep, _ cx: Double, _ cy: Double) -> Px {
-    let s = Double(rep.pixelsWide) / 480
+    let s = Double(rep.pixelsWide) / canvasWidthPt
     var best = px(rep, Int(cx * s), Int(cy * s))
     for dx in -2...2 { for dy in -2...2 { let p = px(rep, Int(cx * s) + dx, Int(cy * s) + dy); if p.lum < best.lum { best = p } } }
     return best
 }
-func at(_ rep: NSBitmapImageRep, _ cx: Double, _ cy: Double) -> Px { let s = Double(rep.pixelsWide) / 480; return px(rep, Int(cx * s), Int(cy * s)) }
+func at(_ rep: NSBitmapImageRep, _ cx: Double, _ cy: Double) -> Px { let s = Double(rep.pixelsWide) / canvasWidthPt; return px(rep, Int(cx * s), Int(cy * s)) }
 func isTeal(_ p: Px) -> Bool { abs(p.r - 0) < 0.12 && abs(p.g - 0.8) < 0.12 && abs(p.b - 0.85) < 0.12 && p.a > 0.95 }
 func isDark(_ p: Px) -> Bool { p.lum < 0.15 && p.a > 0.95 }
 func thickness(_ rep: NSBitmapImageRep, col cx: Double, around cy: Double) -> Int {
-    let s = Double(rep.pixelsWide) / 480; let x = Int(cx * s); var n = 0
+    let s = Double(rep.pixelsWide) / canvasWidthPt; let x = Int(cx * s); var n = 0
     for y in max(0, Int(cy * s) - 120)..<min(rep.pixelsHigh, Int(cy * s) + 120) where isDark(px(rep, x, y)) { n += 1 }
     return n
 }
@@ -107,7 +109,9 @@ func keyGuard(_ pid: pid_t, _ app: AXUIElement) -> String? {
     guard wait(2, { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }) else {
         return "frontmost pid=\(NSWorkspace.shared.frontmostApplication?.processIdentifier ?? -1) != candidate \(pid)" }
     guard let fw = ax(app, "AXFocusedWindow") else { return "AXFocusedWindow absent for candidate" }
-    guard axs(fw as! AXUIElement, "AXTitle") == "ShortNote" else { return "focused window is not the panel" }
+    // フォーカスが候補自身のパネル、またはそのファイル選択シートにあること（他のウィンドウではないこと）
+    let fwEl = fw as! AXUIElement
+    guard axs(fwEl, "AXTitle") == "ShortNote" || axs(fwEl, "AXRole") == "AXSheet" else { return "focused window is not the panel (role=\(axs(fwEl, "AXRole")) title=\(axs(fwEl, "AXTitle")))" }
     return nil
 }
 func key(_ code: CGKeyCode, _ flags: CGEventFlags) {
@@ -163,6 +167,15 @@ func finish() -> Never {
 }
 
 let app = AXUIElementCreateApplication(pid)
+
+/// キャンバスの画面上の枠（左上原点）。Accessibility の「キャンバス」グループから実測する。
+func canvasFrame() -> CGRect? {
+    guard let g = collect(app, { axs($0, "AXRole") == "AXGroup" && axs($0, "AXDescription") == "キャンバス" }).first,
+          let pv = ax(g, "AXPosition"), let sv = ax(g, "AXSize") else { return nil }
+    var p = CGPoint.zero, s = CGSize.zero
+    AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &s)
+    return CGRect(origin: p, size: s)
+}
 var win: [String: Any]? = nil
 _ = wait(6) { win = candWindow(pid); return win != nil }
 guard let w = win else { rec("C1 panel appears", "fail", "no on-screen 'ShortNote' window for pid \(pid) within 6s"); finish() }
@@ -176,8 +189,10 @@ func capturePanel(_ name: String) -> NSBitmapImageRep? {
     sh(["screencapture", "-x", "-o", "-l\(id)", "\(work)/\(name).png"]); return load("\(work)/\(name).png")
 }
 if let cap = capturePanel("panel1") {
-    let s = Double(cap.pixelsWide) / Double(wb.width)
-    let p = px(cap, Int((12 + 360) * s), Int((61 + 100) * s))
+    let cw0 = candWindow(pid).map { bounds($0) } ?? wb
+    var cf0 = CGRect.zero; _ = wait(5) { if let c = canvasFrame() { cf0 = c; return true }; return false }
+    let s = Double(cap.pixelsWide) / Double(cw0.width)
+    let p = px(cap, Int((cf0.minX - cw0.minX + 360) * s), Int((cf0.minY - cw0.minY + 100) * s))
     rec("C3 CLI image shown on canvas (window capture)", isTeal(p) ? "pass" : "fail", "canvas px rgb=\(p.r),\(p.g),\(p.b); capture \(cap.pixelsWide)x\(cap.pixelsHigh)")
 } else { rec("C3 CLI image shown on canvas", "blocked", "window capture failed") }
 
@@ -200,7 +215,7 @@ func export() -> String? {
     _ = wait(5) { let s = NSPasteboard.general.string(forType: .string); if let s, s != "SNV-SENTINEL" { path = s; return true }; return false }
     return path
 }
-let C = CGPoint(x: wb.origin.x + 12, y: wb.origin.y + 61)   // canvas origin on screen (calibrated from panel capture)
+let C = canvasFrame().map { CGPoint(x: $0.minX, y: $0.minY) } ?? CGPoint(x: wb.origin.x + 12, y: wb.origin.y + 61)   // キャンバスの左上（画面座標）。Accessibility の実測
 func pt(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: C.x + x, y: C.y + y) }
 
 // baseline export
@@ -263,7 +278,7 @@ if let box = boxes.first, AXUIElementPerformAction(box, kAXPressAction as CFStri
 
 // ================= new features =================
 func countDark(_ r: NSBitmapImageRep, _ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> Int {
-    let s = Double(r.pixelsWide) / 480; var n = 0
+    let s = Double(r.pixelsWide) / canvasWidthPt; var n = 0
     for y in Int(y0 * s)..<Int(y1 * s) { for x in Int(x0 * s)..<Int(x1 * s) where isDark(px(r, x, y)) { n += 1 } }
     return n
 }
@@ -367,15 +382,148 @@ if !dragsrcOK {
     if let r = exportImg() { rec("M3 Cmd+Z undoes the dropped image", (!isMag(at(r, 200, 200)) && isColor(at(r, 240, 160), 0.9, 0.1, 0.1)) ? "pass" : "fail", "pasted red image remains") }
 } else { rec("M2/M3 undo", "blocked", "keyboard guard failed") }
 
+// ---- ウィンドウのリサイズ・最大化（A12）----
+func axWindow() -> AXUIElement? { (ax(app, "AXWindows") as? [AXUIElement])?.first }
+func axSize(_ e: AXUIElement) -> CGSize? { guard let v = ax(e, "AXSize") else { return nil }; var s = CGSize.zero; AXValueGetValue(v as! AXValue, .cgSize, &s); return s }
+func setAXSize(_ e: AXUIElement, _ w: CGFloat, _ h: CGFloat) { var s = CGSize(width: w, height: h); if let v = AXValueCreate(.cgSize, &s) { _ = AXUIElementSetAttributeValue(e, "AXSize" as CFString, v) } }
+func waitCanvas(_ pred: (CGRect) -> Bool) -> CGRect? { var r: CGRect? = nil; _ = wait(4) { if let c = canvasFrame(), pred(c) { r = c; return true }; return false }; return r }
+if let aw = axWindow(), let c0 = canvasFrame(), let w0 = axSize(aw) {
+    setAXSize(aw, 300, 200); usleep(600_000)
+    let cMin = canvasFrame() ?? c0
+    rec("Z1 window cannot shrink below the canvas minimum", (cMin.width >= 480 && cMin.height >= 320) ? "pass" : "fail", "after asking for 300x200: canvas \(Int(cMin.width))x\(Int(cMin.height)) (minimum 480x320)")
+
+    setAXSize(aw, w0.width + 240, w0.height + 160)
+    if let c1 = waitCanvas({ $0.width > c0.width + 200 }) {
+        canvasWidthPt = Double(c1.width)
+        if let r = exportImg() {
+            let penKept = isDark(darkest(r, 360, 30))
+            let aspectOK = abs((Double(r.pixelsWide) / Double(r.pixelsHigh)) / Double(c1.width / c1.height) - 1) < 0.01
+            let corner = at(r, Double(c1.width) - 10, Double(c1.height) - 10)
+            rec("Z2 growing the window grows the canvas; content stays at the top-left", (penKept && aspectOK && corner.a > 0.95 && corner.r > 0.95 && corner.g > 0.95) ? "pass" : "fail",
+                "canvas \(Int(c0.width))x\(Int(c0.height)) -> \(Int(c1.width))x\(Int(c1.height)); export \(r.pixelsWide)x\(r.pixelsHigh); pen stroke kept at same position=\(penKept); aspect matches=\(aspectOK); new area is white=\(corner.r > 0.95)")
+        } else { rec("Z2", "blocked", "export failed") }
+
+        // 最大化（ズームボタン）
+        if let zb = ax(aw, "AXZoomButton") {
+            _ = AXUIElementPerformAction(zb as! AXUIElement, kAXPressAction as CFString)
+            if let c2 = waitCanvas({ $0.width > c1.width + 100 || $0.height > c1.height + 100 }) {
+                usleep(500_000)
+                let cz = canvasFrame() ?? c2
+                canvasWidthPt = Double(cz.width)
+                if let r = exportImg() {
+                    let longest = max(r.pixelsWide, r.pixelsHigh)
+                    let penKept = isDark(darkest(r, 360, 30))
+                    rec("Z3 zoom button maximizes; canvas fills it; export stays within the size cap", (penKept && longest <= 8192) ? "pass" : "fail",
+                        "canvas \(Int(c1.width))x\(Int(c1.height)) -> \(Int(cz.width))x\(Int(cz.height)); export \(r.pixelsWide)x\(r.pixelsHigh) (longest \(longest) <= 8192); pen stroke kept=\(penKept)")
+                }
+                _ = AXUIElementPerformAction(zb as! AXUIElement, kAXPressAction as CFString)   // もとの大きさへ
+                let back = waitCanvas({ $0.width < cz.width - 100 })
+                rec("Z4 zoom button again restores the previous size", back != nil ? "pass" : "fail", "canvas after second press: \(back.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unchanged")")
+            } else { rec("Z3 zoom button maximizes", "fail", "canvas did not grow after AXPress on the zoom button (zoom button enabled=\(String(describing: ax(zb as! AXUIElement, "AXEnabled"))))") }
+        } else { rec("Z3 zoom button maximizes", "fail", "the window has no AXZoomButton") }
+    } else { rec("Z2 growing the window grows the canvas", "fail", "canvas did not grow after setting AXSize") }
+    setAXSize(aw, w0.width, w0.height); _ = waitCanvas({ abs($0.width - c0.width) < 2 }); canvasWidthPt = 480
+} else { rec("Z1-Z4 window resize / maximize", "blocked", "could not read the window or canvas through Accessibility") }
+
+// ---- ファイル選択（A05）----
+func sheets() -> [AXUIElement] { collect(app) { axs($0, "AXRole") == "AXSheet" } }
+let pickDir = "\(work)/pick"
+try? FileManager.default.createDirectory(atPath: pickDir, withIntermediateDirectories: true)
+makeImage("\(pickDir)/blue.png", NSColor(deviceRed: 0.1, green: 0.1, blue: 0.9, alpha: 1))
+if let why = keyGuard(pid, app) {
+    for id in ["F0 Cmd+O opens the file chooser", "F1 add-image button opens the file chooser", "F2 chosen image is added"] { rec(id, "blocked", "keyboard guard: \(why)") }
+} else {
+    key(31, .maskCommand)
+    let openedByKey = wait(4) { !sheets().isEmpty }
+    rec("F0 Cmd+O opens the file chooser", openedByKey ? "pass" : "fail", "AXSheet count=\(sheets().count)")
+    if openedByKey { key(53, []); _ = wait(3) { sheets().isEmpty } }
+
+    let pickBtn = collect(app) { axs($0, "AXRole") == "AXButton" && axs($0, "AXDescription") == "画像を追加" }.first
+    if let pb = pickBtn, AXUIElementPerformAction(pb, kAXPressAction as CFString) == .success {
+        let opened = wait(4) { !sheets().isEmpty }
+        rec("F1 add-image button opens the file chooser", opened ? "pass" : "fail", "AXSheet count=\(sheets().count)")
+        if opened, keyGuard(pid, app) == nil {
+            // Cmd+Shift+G で「フォルダへ移動」を開き、入力欄へ AX で青い画像のパスを入れる（キー入力より確実）。
+            // Return で移動してそのファイルが選択され、もう一度 Return で開く。
+            key(5, [.maskCommand, .maskShift]); _ = wait(3) { sheets().count >= 2 }; usleep(400_000)
+            if let inner = sheets().last, let field = collect(inner, { axs($0, "AXRole") == "AXTextField" }).first {
+                _ = AXUIElementSetAttributeValue(field, "AXValue" as CFString, "\(pickDir)/blue.png" as CFString)
+            }
+            usleep(400_000)
+            key(36, []); _ = wait(3) { sheets().count == 1 }; usleep(700_000)   // 移動（そのファイルが選択される）
+            key(36, [])                                                           // 開く
+            let closed = wait(5) { sheets().isEmpty }
+            if closed, let r = exportImg() {
+                let ctr = at(r, canvasWidthPt / 2, 160)
+                let isBlue = ctr.b > 0.7 && ctr.r < 0.35 && ctr.g < 0.4 && ctr.a > 0.95   // 色管理で G が 0.1 → 約 0.23 になる。赤（貼り付け画像）・ティール（背景）とは区別できる
+                rec("F2 chosen image is added at the centre", isBlue ? "pass" : "fail", "centre px rgb=\(ctr.r),\(ctr.g),\(ctr.b) (expect blue)")
+            } else {
+                for _ in 0..<3 where !sheets().isEmpty { key(53, []) }
+                rec("F2 chosen image is added at the centre", "blocked", "could not drive the open panel with keystrokes (sheet still open after Return)")
+            }
+        } else if opened { rec("F2 chosen image is added at the centre", "blocked", "keyboard guard failed after the sheet opened") }
+    } else { rec("F1 add-image button opens the file chooser", "fail", "no AXButton 'add image' found or AXPress failed") }
+}
+// ファイル選択のシートが残っていたら閉じる（後続の撮影に写らないように）
+for _ in 0..<3 where !sheets().isEmpty { key(53, []); _ = wait(2) { sheets().isEmpty } }
+
 // second launch forwards to resident instance
 let before2 = proc.isRunning
 let p2 = Process(); p2.executableURL = URL(fileURLWithPath: buildExe); p2.arguments = ["\(work)/red.png"]
 try p2.run(); let exited = wait(4) { !p2.isRunning }
 let stillSame = sh(["ps", "-p", "\(pid)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == startTime
 if let cap = capturePanel("panel2") {
-    let s = Double(cap.pixelsWide) / Double(wb.width); let p = px(cap, Int((12 + 360) * s), Int((61 + 100) * s))
+    let cw = candWindow(pid).map { bounds($0) } ?? wb; let cf = canvasFrame() ?? .zero
+    let s = Double(cap.pixelsWide) / Double(cw.width); let p = px(cap, Int((cf.minX - cw.minX + 360) * s), Int((cf.minY - cw.minY + 100) * s))
     rec("C17 2nd launch w/ path forwards to resident instance", (exited && stillSame && before2 && p.r > 0.7 && p.g < 0.3) ? "pass" : "fail", "2nd exited=\(exited) resident same start=\(stillSame) canvas rgb=\(p.r),\(p.g),\(p.b)")
 }
+
+// ---- 画像の向き：上下・左右が反転していない（画面の描画と書き出しの両方）----
+func makeAsymImage(_ path: String) {
+    let img = NSImage(size: NSSize(width: 800, height: 500))
+    img.lockFocus()
+    NSColor(deviceRed: 0.9, green: 0.1, blue: 0.1, alpha: 1).setFill(); NSRect(x: 0, y: 250, width: 400, height: 250).fill()    // 見た目の左上：赤
+    NSColor(deviceRed: 0.95, green: 0.9, blue: 0.1, alpha: 1).setFill(); NSRect(x: 400, y: 250, width: 400, height: 250).fill() // 右上：黄
+    NSColor(deviceRed: 0.1, green: 0.7, blue: 0.1, alpha: 1).setFill(); NSRect(x: 0, y: 0, width: 800, height: 250).fill()      // 下半分：緑
+    img.unlockFocus()
+    let rep = NSBitmapImageRep(data: img.tiffRepresentation!)!
+    try! rep.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: path))
+}
+func isRedish(_ p: Px) -> Bool { p.r > 0.7 && p.g < 0.35 && p.b < 0.35 && p.a > 0.95 }
+func isYellowish(_ p: Px) -> Bool { p.r > 0.7 && p.g > 0.7 && p.b < 0.4 && p.a > 0.95 }
+func isGreenish(_ p: Px) -> Bool { p.g > 0.5 && p.r < 0.4 && p.b < 0.4 && p.a > 0.95 }
+makeAsymImage("\(work)/asym.png")
+let p4 = Process(); p4.executableURL = URL(fileURLWithPath: buildExe); p4.arguments = ["\(work)/asym.png"]
+try p4.run(); _ = wait(4) { !p4.isRunning }
+if let cf = waitCanvas({ _ in true }) {
+    _ = wait(2) { true }; usleep(500_000)
+    let W = Double(cf.width), H = Double(cf.height)
+    let pts = [(W * 0.25, H * 0.3), (W * 0.75, H * 0.3), (W * 0.5, H * 0.8)]   // 左上・右上・下
+    var screenOK = false
+    if let cap = capturePanel("orient"), let cw = candWindow(pid).map({ bounds($0) }) {
+        let s = Double(cap.pixelsWide) / Double(cw.width)
+        let q = pts.map { px(cap, Int((Double(cf.minX - cw.minX) + $0.0) * s), Int((Double(cf.minY - cw.minY) + $0.1) * s)) }
+        screenOK = isRedish(q[0]) && isYellowish(q[1]) && isGreenish(q[2])
+    }
+    canvasWidthPt = W
+    var exportOK = false
+    if let r = exportImg() { let q = pts.map { at(r, $0.0, $0.1) }; exportOK = isRedish(q[0]) && isYellowish(q[1]) && isGreenish(q[2]) }
+    canvasWidthPt = 480
+    rec("O1 background image keeps its orientation (screen drawing and export)", (screenOK && exportOK) ? "pass" : "fail", "top-left red / top-right yellow / bottom green on screen=\(screenOK), in the exported PNG=\(exportOK)")
+
+    // 貼り付けた画像も同じ向きか（背景と同じ柄を中央に貼る。反転していれば左上が緑になる）
+    NSPasteboard.general.clearContents(); NSPasteboard.general.writeObjects([NSImage(contentsOfFile: "\(work)/asym.png")!])
+    if keyGuard(pid, app) == nil {
+        key(9, .maskCommand)
+        canvasWidthPt = W
+        if let r = exportImg() {
+            // 貼り付け画像は 70% に縮小して中央：左上の四分の一 ≈ (0.30W…0.5W, 0.17H…0.5H) の中の点
+            let tl = at(r, W * 0.36, H * 0.3), tr = at(r, W * 0.64, H * 0.3), bot = at(r, W * 0.5, H * 0.8)
+            rec("O2 pasted image keeps its orientation", (isRedish(tl) && isYellowish(tr) && isGreenish(bot)) ? "pass" : "fail", "pasted-image points: top-left red=\(isRedish(tl)) top-right yellow=\(isYellowish(tr)) bottom green=\(isGreenish(bot))")
+        }
+        canvasWidthPt = 480
+    } else { rec("O2 pasted image keeps its orientation", "blocked", "keyboard guard failed") }
+} else { rec("O1 image orientation", "blocked", "canvas frame unavailable") }
 
 // Esc last
 if keyGuard(pid, app) == nil {
