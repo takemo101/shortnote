@@ -2,7 +2,7 @@
 #
 #   git tag v1.0.0 && git push origin v1.0.0      タグの commit が main に含まれているときだけ、Release を作る
 #   手動実行（Actions タブ → Run workflow）        Release は作らない。DMG をアーティファクトに残すだけ（ドライラン）
-#
+#   Pull Request（リリースに関わるファイルを変えたとき）  同じドライラン。ワークフロー自体は、マージ前に、この経路で検証できる
 # 署名は ad-hoc のまま。署名・公証の鍵や認証情報（secrets）は、このワークフローに渡さない。
 # 権限は最小：ビルドとテストは contents: read、Release の作成だけ contents: write。
 name: release
@@ -11,6 +11,15 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+"
+  pull_request:
+    paths:
+      - ".github/workflows/release.yml"
+      - "scripts/build.sh"
+      - "scripts/dmg.sh"
+      - "scripts/verify-dmg.sh"
+      - "scripts/test.sh"
+      - "Package.swift"
+      - "Resources/**"
   workflow_dispatch:
 
 permissions:

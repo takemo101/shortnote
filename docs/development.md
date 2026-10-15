@@ -135,6 +135,6 @@ Git の書込みは `but` を使う。統合先は `main`、GitButler target は
 1. 公開したい commit が `main` に入っていること（`main` に含まれない commit のタグでは、Release を作らない）。版は、アプリの `CFBundleShortVersionString` と `CFBundleVersion` に、タグの `X.Y.Z` が入る（`VERSION` を `build.sh` に渡す）。
 2. タグを作って push する：`git tag vX.Y.Z <main の commit> && git push origin vX.Y.Z`（Git の書込みは `but` を使う規約のため、タグの作成・push は、ユーザーが行うか、依頼を受けて行う）。
 3. ワークフローが、単体テスト → `VERSION=X.Y.Z ./scripts/dmg.sh` → `./scripts/verify-dmg.sh`（整合・中身・アイコン・版・Universal・署名）→ `ShortNote-X.Y.Z.dmg` と `.sha256` の作成、の順に進み、通ったときだけ Release を作る。Release のノートには、インストールと Gatekeeper の回避手順を付け、変更点は GitHub が生成する。
-4. タグを打たずに確かめたいときは、Actions タブ → release → Run workflow（`workflow_dispatch`）。Release は作らず、DMG をアーティファクト（14 日）に残す。
+4. タグを打たずに確かめたいときは、Actions タブ → release → Run workflow（`workflow_dispatch`。ワークフローが `main` に入ってから使える）。Release は作らず、DMG をアーティファクト（14 日）に残す。リリースに関わるファイル（ワークフロー、ビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request でも、同じドライランが自動で走る（マージ前に、ワークフロー自体を検証できる）。
 
 署名は ad-hoc のまま。署名・公証の鍵や認証情報を、ワークフローに渡さない。ローカルで同じ検査をするには、`VERSION=X.Y.Z ./scripts/dmg.sh && ./scripts/verify-dmg.sh build/ShortNote.dmg X.Y.Z`。

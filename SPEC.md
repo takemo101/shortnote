@@ -170,7 +170,7 @@
 ### 10.1 GitHub Releases での配布
 
 - タグ `vX.Y.Z`（数字 3 つ）の push で、GitHub Actions（`.github/workflows/release.yml`）が DMG をビルドし、同名のタグの GitHub Release に添付する（ダウンロードできる）。ファイルは `ShortNote-X.Y.Z.dmg` と、その SHA-256（`ShortNote-X.Y.Z.dmg.sha256`）。リリースの公開は、利用者の依頼で、利用者がタグを打つ（またはタグの作成を依頼する）ことで行う。自動では公開しない。
-- 手動実行（`workflow_dispatch`）は、Release を作らない。DMG をアーティファクトに残すだけ（タグを打たずに、ビルドと検査を確かめるためのドライラン）。
+- 手動実行（`workflow_dispatch`）と、リリースに関わるファイル（ワークフロー、`scripts/` のビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request は、Release を作らない。DMG をアーティファクトに残すだけ（タグを打たずに、ビルドと検査を確かめるためのドライラン）。Pull Request の実行にも、secrets は渡らず、権限は `contents: read` のまま。
 - 署名は ad-hoc のまま（上と同じ）。ワークフローに、署名・公証の鍵や認証情報（secrets）を渡さない。Developer ID 署名・公証を CI に入れるときは、先にこの節を更新する。
 - 権限は最小：ビルドとテストは `contents: read`、Release の作成だけ `contents: write`。第三者のアクションは使わず、GitHub 公式（`actions/*`）と、ランナーの `gh` だけを使う。
 - Release を作るのは、タグの commit が `main` に含まれているときだけ。
