@@ -2,7 +2,7 @@ import AppKit
 
 /// 描画ツール。`rawValue` は、ツールバーのセグメントの番号。
 enum Tool: Int, CaseIterable {
-    case pen, ellipse, rect, text, move
+    case pen, ellipse, rect, text, move, line
 }
 
 /// キャンバス。ポインタ入力を、`Document` の変更（履歴つき）につなぐ。描画は `CanvasRenderer`、文字入力は `InlineTextEditor` が行う。
@@ -219,6 +219,8 @@ final class CanvasView: NSView {
             draft = Item(content: .ellipse(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize)
         case .rect:
             draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize)
+        case .line:
+            draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize)
         case .text:
             beginText(at: p)
         case .move:
@@ -247,6 +249,8 @@ final class CanvasView: NSView {
             draft?.content = .ellipse(dragRect(to: p))
         case .rect:
             draft?.content = .rect(dragRect(to: p))
+        case .line(let from, _):
+            draft?.content = .line(from: from, to: p)
         case .text, .image:
             break
         }
@@ -268,6 +272,8 @@ final class CanvasView: NSView {
         switch item.content {
         case .ellipse(let r), .rect(let r):
             guard r.width >= 1, r.height >= 1 else { needsDisplay = true; return }   // 大きさのない図形は捨てる
+        case .line(let a, let b):
+            guard hypot(b.x - a.x, b.y - a.y) >= 1 else { needsDisplay = true; return }   // 大きさのない直線は捨てる
         default:
             break
         }
