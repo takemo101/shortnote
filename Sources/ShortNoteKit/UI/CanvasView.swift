@@ -198,8 +198,9 @@ final class CanvasView: NSView {
 
     // MARK: - ポインタ
 
+    /// ポインタの位置（キャンバスの座標）。キャンバスの外へ出たら、縁の位置に丸める（SPEC §3.2）。
     private func location(_ event: NSEvent) -> CGPoint {
-        convert(event.locationInWindow, from: nil)
+        convert(event.locationInWindow, from: nil).clamped(to: bounds)
     }
 
     /// 筆圧はタブレット入力のときだけ使う。トラックパッドの感圧では太さを変えない。
