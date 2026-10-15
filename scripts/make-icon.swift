@@ -122,6 +122,12 @@ func drawMenuBarIcon(_ ctx: CGContext) {
     ctx.move(to: a); ctx.addLine(to: b); ctx.addLine(to: corner); ctx.closePath()
     ctx.fillPath()
     ctx.restoreGState()
+    // 折り返し：本体の黒の上に半透明を重ねても見た目は変わらないので、いったん抜いてから、半透明で塗る。
+    ctx.saveGState()
+    ctx.setBlendMode(.clear)
+    ctx.move(to: a); ctx.addLine(to: b); ctx.addLine(to: tip); ctx.closePath()
+    ctx.fillPath()
+    ctx.restoreGState()
     ctx.setFillColor(CGColor(gray: 0, alpha: 0.5))
     ctx.move(to: a); ctx.addLine(to: b); ctx.addLine(to: tip); ctx.closePath()
     ctx.fillPath()

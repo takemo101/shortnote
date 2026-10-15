@@ -211,23 +211,39 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
         }
     }
 
-    @Test func unknownConflictingAndReservedEntriesAreDropped() {
+    @Test func unknownReservedAndOverlappingEntriesAreDropped() {
         withStore { store, ud in
-            // toolRect に "1"（toolPen と衝突）、toolText に ⌘C（予約）、存在しないコマンド、
-            // undo に有効なキー ⌘J。
+            // 存在しないコマンド、toolText に ⌘C（予約）、undo に有効なキー ⌘J、
+            // toolRect と toolMove の両方に "1"（保存した割り当てどうしが重なる）。
             setRaw("""
             {"bogus":[{"keyCode":1,"modifiers":8,"label":"S"}],
-             "toolRect":[{"keyCode":18,"modifiers":0,"label":"1"}],
              "toolText":[{"keyCode":8,"modifiers":8,"label":"C"}],
-             "undo":[{"keyCode":38,"modifiers":8,"label":"J"}]}
+             "undo":[{"keyCode":38,"modifiers":8,"label":"J"}],
+             "toolRect":[{"keyCode":18,"modifiers":0,"label":"1"}],
+             "toolMove":[{"keyCode":18,"modifiers":0,"label":"1"}]}
             """, ud)
             let loaded = store.load()
             #expect(loaded.issue != nil)
             #expect(!hasConflict(loaded.bindings))
-            #expect(loaded.bindings.chords(for: .toolPen) == [one])
             #expect(loaded.bindings.chords(for: .undo).map(\.displayString) == ["⌘J"])
-            #expect(!loaded.bindings.chords(for: .toolText).contains(chord(8, .command, "C")))
-            #expect(loaded.bindings.chords(for: .toolRect).isEmpty)   // 重なって無効になったコマンドは、既定の 3 に戻らず、割り当てなしになる
+            #expect(loaded.bindings.chords(for: .toolText).isEmpty)       // 予約済みは落ち、既定の 4 には戻らず、割り当てなしになる
+            #expect(loaded.bindings.chords(for: .toolRect) == [one])      // 重なる保存どうしは、Command.allCases 順の先が残る
+            #expect(loaded.bindings.chords(for: .toolMove).isEmpty)
+            #expect(loaded.bindings.chords(for: .toolPen).isEmpty)        // 既定の 1 は、保存した割り当て（toolRect）に譲る
+        }
+    }
+
+    @Test func aSavedKeyWinsOverTheDefaultOfACommandAddedLater() {
+        // クリア（既定 ⌘K）を足す前の版で、取り消しに ⌘K を保存していた利用者。取り消しのキーは消えず、クリアのキーが外れる。
+        withStore { store, ud in
+            setRaw("""
+            {"undo":[{"keyCode":40,"modifiers":8,"label":"K"}]}
+            """, ud)
+            let loaded = store.load()
+            #expect(loaded.bindings.chords(for: .undo).map(\.displayString) == ["⌘K"])
+            #expect(loaded.bindings.chords(for: .clearCanvas).isEmpty)
+            #expect(!hasConflict(loaded.bindings))
+            #expect(loaded.issue?.contains("キャンバスをクリア") == true)   // 何が外れたかを、利用者に知らせる
         }
     }
 
