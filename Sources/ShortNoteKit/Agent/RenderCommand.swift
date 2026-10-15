@@ -26,6 +26,8 @@ enum RenderCommand {
             switch arg {
             case "-o":
                 guard i + 1 < args.count else { return .failure(.usage("`-o` の後ろに、出力のパスが必要です")) }
+                guard output == nil else { return .failure(.usage("`-o` は 1 回だけ指定できます")) }
+                guard args[i + 1] != "-" else { return .failure(.usage("`-o` に `-`（標準出力）は使えません。ファイルのパスを指定してください")) }
                 output = args[i + 1]
                 i += 1
             case "--size":
@@ -52,8 +54,9 @@ enum RenderCommand {
 
     /// `幅x高さ`（ピクセル）。§3.1.1 の規則（偶数・最小・長辺の上限）で検証する。
     static func parseSize(_ text: String) -> Result<CanvasSize, AgentError> {
-        let parts = text.lowercased().split(separator: "x").map(String.init)
-        guard parts.count == 2, let w = Int(parts[0]), let h = Int(parts[1]) else { return .failure(.usage("`--size` は 幅x高さ（例 1280x720）で指定してください：\(text)")) }
+        let parts = text.lowercased().split(separator: "x", omittingEmptySubsequences: false).map(String.init)
+        let digits: (String) -> Bool = { !$0.isEmpty && $0.allSatisfy { $0 >= "0" && $0 <= "9" } }
+        guard parts.count == 2, digits(parts[0]), digits(parts[1]), let w = Int(parts[0]), let h = Int(parts[1]) else { return .failure(.usage("`--size` は 幅x高さ（例 1280x720）で指定してください：\(text)")) }
         let limits = CanvasSize.Limits(availablePoints: CGSize(width: CanvasSize.maxSide, height: CanvasSize.maxSide))
         switch CanvasSize.parse(width: w, height: h, limits: limits) {
         case .success(let size): return .success(size)

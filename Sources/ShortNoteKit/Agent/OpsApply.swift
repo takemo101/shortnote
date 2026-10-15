@@ -36,13 +36,15 @@ enum OpsApply {
 
             case .line(let from, let to, let color, let size):
                 let a = clamp(from), b = clamp(to)
-                guard hypot(b.x - a.x, b.y - a.y) >= 1 else { result.skipped.append(i); continue }
+                guard (a == from && b == to) || hypot(b.x - a.x, b.y - a.y) >= 1 else { result.skipped.append(i); continue }
                 result.items.append(Item(content: .line(from: a, to: b), color: color.cgColor, size: size))
 
             case .ellipse(let rect, let color, let size), .rect(let rect, let color, let size):
-                let a = clamp(CGPoint(x: rect.minX, y: rect.minY)), b = clamp(CGPoint(x: rect.maxX, y: rect.maxY))
-                let box = CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y)
-                guard box.width >= 1, box.height >= 1 else { result.skipped.append(i); continue }
+                let c1 = CGPoint(x: rect.minX, y: rect.minY), c2 = CGPoint(x: rect.maxX, y: rect.maxY)
+                let a = clamp(c1), b = clamp(c2)
+                let moved = a != c1 || b != c2    // 丸めなかった図形は、そのまま（浮動小数の丸め誤差で、幅 1 が 0.9999… になるのを避ける）
+                let box = moved ? CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y) : rect
+                guard !moved || (box.width >= 1 && box.height >= 1) else { result.skipped.append(i); continue }
                 if case .ellipse = op {
                     result.items.append(Item(content: .ellipse(box), color: color.cgColor, size: size))
                 } else {

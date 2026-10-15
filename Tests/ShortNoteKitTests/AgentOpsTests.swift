@@ -128,6 +128,15 @@ struct OpsApplyTests {
         #expect(to == CGPoint(x: 480, y: 10))
     }
 
+    @Test("丸めていない図形は、そのまま足す（最小の幅 1 を、浮動小数の誤差で、落とさない）")
+    func untouchedShapesAreKeptEvenAtMinimumSize() throws {
+        for x in [0.4, 0.9, 0.1, 100.7] {
+            let r = try apply([.rect(rect: CGRect(x: x, y: x, width: 1, height: 1), color: .black, size: 4),
+                               .line(from: CGPoint(x: x, y: x), to: CGPoint(x: x + 1, y: x), color: .black, size: 4)])
+            #expect(r.items.count == 2 && r.skipped.isEmpty && r.clamped.isEmpty, "x=\(x)")
+        }
+    }
+
     @Test("図形は、四隅を丸める。一部が外なら、縁までの大きさになり、まるごと外なら、足さずに skipped で返す")
     func shapesAreClampedOrSkipped() throws {
         let partly = Op.rect(rect: CGRect(x: -10, y: 300, width: 50, height: 100), color: .black, size: 4)   // 左と下に出る

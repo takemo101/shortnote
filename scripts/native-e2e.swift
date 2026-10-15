@@ -1009,7 +1009,7 @@ func runCLI(_ args: [String], stdin: String? = nil) -> (Int32, String, String) {
     p.waitUntilExit()
     return (p.terminationStatus, String(data: o, encoding: .utf8) ?? "", String(data: e, encoding: .utf8) ?? "")
 }
-let renderIds = ["R1 render writes a 960x640 PNG while the app is running (not forwarded to it)", "R2 the rendered PNG has the operations at the given places and colours", "R3 invalid ops exit 1 with the op index and write nothing; a bad --size exits 2", "R4 ops can be read from stdin, and a coordinate outside the canvas is clamped, not an error"]
+let renderIds = ["R1 render, run while the app is running, writes the 960x640 PNG itself (it is not forwarded to the app)", "R2 the rendered PNG has the operations at the given places and colours", "R3 invalid ops exit 1 with the op index and write nothing; a bad --size exits 2", "R4 ops can be read from stdin, and a coordinate outside the canvas is clamped, not an error"]
 do {
     let rdir = "\(work)/render"
     try? FileManager.default.createDirectory(atPath: rdir, withIntermediateDirectories: true)
@@ -1022,8 +1022,8 @@ do {
     let json1 = (try? JSONSerialization.jsonObject(with: Data(r1.1.utf8))) as? [String: Any]
     let appsAfter = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).count
     let wrote = FileManager.default.fileExists(atPath: outFile)
-    rec(renderIds[0], (r1.0 == 0 && wrote && json1?["width"] as? Int == 960 && json1?["height"] as? Int == 640 && appsBefore == appsAfter) ? "pass" : "fail",
-        "exit=\(r1.0) stdout=\(r1.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(r1.2)' file written=\(wrote); running instances with this bundle ID before/after=\(appsBefore)/\(appsAfter)")
+    rec(renderIds[0], (r1.0 == 0 && wrote && json1?["width"] as? Int == 960 && json1?["height"] as? Int == 640 && appsBefore >= 1 && appsBefore == appsAfter) ? "pass" : "fail",
+        "exit=\(r1.0) stdout=\(r1.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(r1.2)' file written by this process=\(wrote) (a forwarded launch would exit 0 without a JSON line or a PNG); running instances with this bundle ID before/after=\(appsBefore)/\(appsAfter) (the app was running: need >= 1; unchanged)")
     if wrote, let rep = load(outFile) {
         canvasWidthPt = 480
         let rectEdge = at(rep, 100, 130), rectInside = at(rep, 160, 130), lineMid = at(rep, 360, 100), corner = at(rep, 460, 300)

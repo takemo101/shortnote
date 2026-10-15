@@ -47,6 +47,7 @@ struct RenderCommandTests {
         [], ["a.png"], ["a.png", "ops.json"], ["a.png", "ops.json", "-o"], ["a.png", "ops.json", "x.png", "-o", "o.png"],
         ["a.png", "ops.json", "-o", "o.png", "--bogus"], ["a.png", "ops.json", "-o", "o.png", "--size"],
         ["a.png", "ops.json", "-o", "o.png", "--size", "big"],
+        ["a.png", "ops.json", "-o", "o.png", "-o", "p.png"], ["a.png", "ops.json", "-o", "-"],
     ])
     func rejectsBadArguments(args: [String]) {
         guard case .failure(let error) = RenderCommand.parse(args) else { Issue.record("通ってしまった：\(args)"); return }
@@ -57,6 +58,7 @@ struct RenderCommandTests {
     @Test("--size：偶数・最小・長辺の上限（§3.1.1）", arguments: [
         ("960x640", true), ("1280x720", true), ("8192x1000", true),
         ("958x640", false), ("961x640", false), ("100x100", false), ("8194x1000", false), ("1280", false), ("axb", false),
+        ("1280x720x", false), ("x1280x720", false), ("1280xx720", false), ("+1280x+720", false), ("1280x", false),
     ])
     func sizeRules(text: String, valid: Bool) {
         if case .success = RenderCommand.parseSize(text) { #expect(valid, "\(text)") } else { #expect(!valid, "\(text)") }
