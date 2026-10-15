@@ -19,6 +19,10 @@ final class CanvasView: NSView {
     }
     var color: NSColor = .black
     var brushSize: CGFloat = 4
+    /// 文字サイズ（ブラシサイズとは別）。入力中に変えると、入力中の文字の大きさも変わる。
+    var textSize: CGFloat = TextSize.default {
+        didSet { editor.setFontSize(textSize) }
+    }
     var transparent = false {
         didSet {
             needsDisplay = true
@@ -215,7 +219,7 @@ final class CanvasView: NSView {
         case .rect:
             draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize)
         case .text:
-            editor.begin(at: p, fontSize: 12 + brushSize * 1.5, color: color.cgColor)
+            editor.begin(at: p, fontSize: textSize, color: color.cgColor)
         case .move:
             if let index = document.topItemIndex(at: p) {
                 move = (index, document)

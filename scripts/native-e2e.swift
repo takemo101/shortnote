@@ -797,6 +797,79 @@ if let why = keyGuard(pid, app) {
     canvasWidthPt = 480
 } else { rec("L1-L3 clear", "blocked", "canvas frame unavailable") }
 
+// ---- 文字サイズ（A17）：ポップアップで選んだ大きさで文字が確定する（ブラシと連動しない）。入力中に変えると、入力欄が大きくなる ----
+func textSizePopup() -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXPopUpButton" && axs($0, "AXIdentifier") == "text-size" }.first }
+/// ポップアップを開いて、`title`（例 "64 pt"）の項目を押す。選ばれたことまで見る。
+func chooseTextSize(_ title: String) -> Bool {
+    guard let popup = textSizePopup() else { print("   chooseTextSize(\(title)): popup not found"); return false }
+    if axs(popup, "AXValue") == title { return true }   // すでに選ばれている項目を押すと、メニューが閉じず、次のクリックが取られる（ハーネス側の事情。実機の操作では、選び直しでも閉じる）
+    _ = AXUIElementPerformAction(popup, kAXPressAction as CFString)
+    var item: AXUIElement? = nil
+    _ = wait(3) { item = collect(popup) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first; return item != nil }
+    guard let item else { print("   chooseTextSize(\(title)): menu item not found after AXPress"); return false }
+    guard AXUIElementPerformAction(item, kAXPressAction as CFString) == .success else { print("   chooseTextSize(\(title)): AXPress of the item failed"); return false }
+    let selected = wait(2) { textSizePopup().map { axs($0, "AXValue") } == title }
+    if !selected { print("   chooseTextSize(\(title)): popup shows '\(textSizePopup().map { axs($0, "AXValue") } ?? "?")'") }
+    usleep(500_000)   // メニューが閉じきるのを待つ（閉じる途中のクリックは、取られる）
+    return selected
+}
+/// 暗い画素がある行の高さ（pt）。文字の高さを見る。無ければ 0。
+func darkHeight(_ r: NSBitmapImageRep, _ x0: Double, _ y0: Double, _ x1: Double, _ y1: Double) -> Double {
+    let s = Double(r.pixelsWide) / canvasWidthPt
+    var top = Int.max, bottom = -1
+    for y in Int(y0 * s)..<Int(y1 * s) {
+        for x in Int(x0 * s)..<Int(x1 * s) where isDark(px(r, x, y)) { top = min(top, y); bottom = max(bottom, y); break }
+    }
+    return bottom < 0 ? 0 : Double(bottom - top + 1) / s
+}
+/// 文字ツールで (x, y) に "HHH" を入れて Return で確定し、書き出しの (y0, y1) の範囲に出た文字の高さ（pt）を返す。
+func typeAndMeasure(_ x: Double, _ y: Double, rows y0: Double, _ y1: Double) -> Double? {
+    guard selectTool(3) else { print("   typeAndMeasure: selectTool failed"); return nil }
+    guard click(pt(x, y)) else { print("   typeAndMeasure: click refused"); return nil }
+    guard wait(2, { editorAreas().count == 1 }), let ta = editorAreas().first else { print("   typeAndMeasure: editor did not open (count=\(editorAreas().count))"); return nil }
+    _ = AXUIElementSetAttributeValue(ta, "AXValue" as CFString, "HHH" as CFString)
+    key(36, [])
+    guard wait(2, { editorAreas().isEmpty }), let r = exportImg() else { return nil }
+    return darkHeight(r, x - 2, y0, x + 300, y1)
+}
+let textSizeIds = ["X1 the text-size popup exists and defaults to 18 pt", "X2 the chosen size is the size of the committed text (18 pt vs 64 pt)", "X3 the text size does not follow the brush size", "X4 changing the size while typing resizes the editor"]
+if let why = keyGuard(pid, app) {
+    for id in textSizeIds { rec(id, "blocked", "keyboard guard: \(why)") }
+} else if let popup = textSizePopup(), let cf = canvasFrame() {
+    canvasWidthPt = Double(cf.width)
+    key(40, .maskCommand)   // 描いたものを消して、空の範囲で文字の高さを測る（背景は暗くない）
+    let initial = axs(popup, "AXValue")
+    rec(textSizeIds[0], initial == "18 pt" ? "pass" : "fail", "AXValue of the popup at launch = '\(initial)'")
+
+    let h18 = chooseTextSize("18 pt") ? typeAndMeasure(120, 30, rows: 26, 60) : nil
+    let h64 = chooseTextSize("64 pt") ? typeAndMeasure(120, 70, rows: 62, 170) : nil
+    let ok2 = (h18 ?? 0) >= 9 && (h18 ?? 0) <= 18 && (h64 ?? 0) >= 38 && (h64 ?? 0) <= 56 && (h64 ?? 0) > (h18 ?? 0) * 2.2
+    rec(textSizeIds[1], ok2 ? "pass" : "fail", "height of the dark rows of 'HHH': 18 pt -> \(h18.map { String(format: "%.1f", $0) } ?? "n/a") pt (expect 9-18), 64 pt -> \(h64.map { String(format: "%.1f", $0) } ?? "n/a") pt (expect 38-56, > 2.2x)")
+
+    // ブラシを 4 -> 24 にして（] を 10 回）、文字サイズは 18 pt のまま。連動していたなら、12 + 24 * 1.5 = 48 pt になる。
+    var brushNote = "no ] keycode"
+    if let bracket = keyCodeProducing("]"), chooseTextSize("18 pt"), selectTool(0) {
+        for _ in 0..<10 { key(bracket, []); usleep(60_000) }
+        brushNote = "brush slider = \(sliderValue().map { String(format: "%.0f", $0) } ?? "?")"
+        let h = typeAndMeasure(120, 190, rows: 182, 300)
+        let ok3 = (sliderValue() ?? 0) >= 20 && abs((h ?? 99) - (h18 ?? -99)) <= 2.5
+        rec(textSizeIds[2], ok3 ? "pass" : "fail", "\(brushNote); 'HHH' at 18 pt measured \(h.map { String(format: "%.1f", $0) } ?? "n/a") pt vs \(h18.map { String(format: "%.1f", $0) } ?? "n/a") pt at the default brush (a brush-linked size would be 48 pt, ~34 pt tall)")
+        for _ in 0..<10 { key(keyCodeProducing("[") ?? bracket, []); usleep(60_000) }
+    } else { rec(textSizeIds[2], "blocked", "could not set the brush with the ] key, or select 18 pt / the pen tool") }
+
+    // 入力中に変える：入力欄（AXTextArea）の高さが、新しい大きさの 1 行分以上になる。
+    if selectTool(3), chooseTextSize("18 pt"), click(pt(300, 40)), wait(2, { editorAreas().count == 1 }), let ta = editorAreas().first {
+        _ = AXUIElementSetAttributeValue(ta, "AXValue" as CFString, "H" as CFString)
+        let before = axSize(ta)?.height ?? 0
+        let changed = chooseTextSize("48 pt")
+        var after: CGFloat = 0
+        _ = wait(2) { after = editorAreas().first.flatMap { axSize($0) }?.height ?? 0; return after >= 62 }
+        rec(textSizeIds[3], (changed && before > 0 && before < 40 && after >= 62) ? "pass" : "fail", "editor height at 18 pt = \(before) pt; after choosing 48 pt while typing = \(after) pt (need >= 62: one 48 pt line is 62.4)")
+        key(53, [])   // 取り消す
+    } else { rec(textSizeIds[3], "blocked", "could not open the editor or select the sizes") }
+    canvasWidthPt = 480
+} else { for id in textSizeIds { rec(id, "blocked", "the text-size popup (AXIdentifier text-size) or the canvas frame was not found\n" + dumpTree(app)) } }
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
