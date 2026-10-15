@@ -2,7 +2,8 @@ import AppKit
 import Carbon.HIToolbox
 
 /// 2 つ目以降の起動（CLI 引数つき含む）から、常駐中のインスタンスへ表示/画像読み込みを依頼する。
-private let openNotification = Notification.Name("dev.takemo101.shortnote.open")
+/// 通知名は bundle ID から決める（本番は dev.takemo101.shortnote.open）。ID の違うコピー（検証用など）とは混ざらない。
+private let openNotification = Notification.Name("\(Bundle.main.bundleIdentifier ?? "dev.takemo101.shortnote").open")
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // `open` 経由の起動では application(_:open:) が didFinishLaunching より先に来るため lazy。
@@ -31,10 +32,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(remoteOpen(_:)), name: openNotification, object: nil
         )
 
+        // 起動したらすぐ描けるよう、ウィンドウは毎回出す（画像を渡されたら背景として開く）。
         if let path = cliPaths().first {
             controller.load(URL(fileURLWithPath: path))
-            controller.show()
         }
+        controller.show()
     }
 
     /// 既に常駐しているなら、そちらに依頼して自分は終了する。
