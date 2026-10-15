@@ -103,6 +103,15 @@ final class CanvasView: NSView {
         changed()
     }
 
+    /// 描いたもの（要素）をすべて消す。背景画像は残す。入力中の文字は、確定してから消す（取り消すと文字ごと戻る）。
+    /// 消すものが無いときは何もしない（履歴にも積まない）。
+    func clearCanvas() {
+        commitEditing()
+        cancelPointerInteraction()
+        guard let cleared = document.clearingItems() else { return }
+        commit(cleared)
+    }
+
     /// 利用者の操作で文書を変える。変更前の文書を履歴に積む。
     private func commit(_ new: Document) {
         cancelPointerInteraction()

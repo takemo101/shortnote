@@ -59,7 +59,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
     }
 
     @Test func unboundChordResolvesToNil() {
-        #expect(b.command(for: chord(40, .command, "K"), whileEditingText: false) == nil)
+        #expect(b.command(for: chord(38, .command, "J"), whileEditingText: false) == nil)
     }
 
     @Test func typingSafetyAndGlobalSafety() {
@@ -95,7 +95,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
     }
 
     @Test func assigningReplacesAllExistingChords() throws {
-        let b = try KeyBindings().assigning(chord(40, .command, "K"), to: .undo).get()
+        let b = try KeyBindings().assigning(chord(38, .command, "J"), to: .undo).get()
         #expect(b.chords(for: .undo).count == 1)
         #expect(b.command(for: cmdZ, whileEditingText: false) == nil)
         #expect(b.command(for: chord(6, .control, "Z"), whileEditingText: false) == nil)
@@ -103,7 +103,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
     }
 
     @Test func assigningTheDefaultBackRemovesTheOverride() throws {
-        let b = try KeyBindings().assigning(chord(40, .command, "K"), to: .openImage).get()
+        let b = try KeyBindings().assigning(chord(38, .command, "J"), to: .openImage).get()
         #expect(b.hasCustomizations)
         let back = try b.assigning(chord(31, .command, "O"), to: .openImage).get()
         #expect(!back.hasCustomizations)
@@ -120,7 +120,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
     }
 
     @Test func resetting() throws {
-        let b = try KeyBindings().assigning(chord(40, .command, "K"), to: .undo).get().clearing(.toolPen)
+        let b = try KeyBindings().assigning(chord(38, .command, "J"), to: .undo).get().clearing(.toolPen)
         let one = try b.resetting(.undo).get()
         #expect(!one.isCustomized(.undo))
         #expect(one.isCustomized(.toolPen))
@@ -193,7 +193,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
     @Test func roundTrip() throws {
         try withStore { store, _ in
             let b = try KeyBindings()
-                .assigning(chord(40, .command, "K"), to: .undo).get()
+                .assigning(chord(38, .command, "J"), to: .undo).get()
                 .clearing(.toolPen)
             store.save(b)
             let loaded = store.load()
@@ -214,18 +214,18 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
     @Test func unknownConflictingAndReservedEntriesAreDropped() {
         withStore { store, ud in
             // toolRect に "1"（toolPen と衝突）、toolText に ⌘C（予約）、存在しないコマンド、
-            // undo に有効なキー ⌘K。
+            // undo に有効なキー ⌘J。
             setRaw("""
             {"bogus":[{"keyCode":1,"modifiers":8,"label":"S"}],
              "toolRect":[{"keyCode":18,"modifiers":0,"label":"1"}],
              "toolText":[{"keyCode":8,"modifiers":8,"label":"C"}],
-             "undo":[{"keyCode":40,"modifiers":8,"label":"K"}]}
+             "undo":[{"keyCode":38,"modifiers":8,"label":"J"}]}
             """, ud)
             let loaded = store.load()
             #expect(loaded.issue != nil)
             #expect(!hasConflict(loaded.bindings))
             #expect(loaded.bindings.chords(for: .toolPen) == [one])
-            #expect(loaded.bindings.chords(for: .undo).map(\.displayString) == ["⌘K"])
+            #expect(loaded.bindings.chords(for: .undo).map(\.displayString) == ["⌘J"])
             #expect(!loaded.bindings.chords(for: .toolText).contains(chord(8, .command, "C")))
             #expect(loaded.bindings.chords(for: .toolRect).isEmpty)   // 重なって無効になったコマンドは、既定の 3 に戻らず、割り当てなしになる
         }
@@ -244,7 +244,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
 
     @Test func noOverridesRemovesTheKey() throws {
         try withStore { store, ud in
-            store.save(try KeyBindings().assigning(chord(40, .command, "K"), to: .undo).get())
+            store.save(try KeyBindings().assigning(chord(38, .command, "J"), to: .undo).get())
             #expect(ud.data(forKey: "keyBindings") != nil)
             store.save(KeyBindings())
             #expect(ud.object(forKey: "keyBindings") == nil)

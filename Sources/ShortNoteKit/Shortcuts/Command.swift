@@ -8,7 +8,7 @@ enum CommandGroup: CaseIterable {
 /// キーボードショートカットで呼び出せる操作。rawValue は永続化のキーなので変更しないこと。
 enum Command: String, CaseIterable, Codable, Hashable {
     case showPanel, hidePanel
-    case undo, redo
+    case undo, redo, clearCanvas
     case pasteImage, openImage, copyPath
     case toolPen, toolEllipse, toolRect, toolText, toolMove
     case brushSmaller, brushLarger
@@ -19,6 +19,7 @@ enum Command: String, CaseIterable, Codable, Hashable {
         case .hidePanel: return "ウィンドウを隠す"
         case .undo: return "取り消し"
         case .redo: return "やり直し"
+        case .clearCanvas: return "キャンバスをクリア"
         case .pasteImage: return "画像を貼り付け"
         case .openImage: return "画像ファイルを選ぶ"
         case .copyPath: return "パスをコピー"
@@ -38,7 +39,7 @@ enum Command: String, CaseIterable, Codable, Hashable {
     var group: CommandGroup {
         switch self {
         case .showPanel, .hidePanel: return .window
-        case .undo, .redo: return .edit
+        case .undo, .redo, .clearCanvas: return .edit
         case .pasteImage, .openImage, .copyPath: return .image
         case .toolPen, .toolEllipse, .toolRect, .toolText, .toolMove: return .tool
         case .brushSmaller, .brushLarger: return .brush

@@ -759,6 +759,44 @@ if let why = keyGuard(pid, app) {
     } else { rec("K4-K9 shortcuts window", "blocked", "the status menu item did not open a focused 'ショートカット' window") }
 }
 
+// ---- クリア（A15）：実キー（Cmd+K）と実ボタン。描いたものが消え、背景の画像は残り、Cmd+Z で戻る ----
+func clearButtonElement() -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXButton" && axs($0, "AXTitle") == "クリア" }.first }
+if let why = keyGuard(pid, app) {
+    for id in ["L1 Cmd+K clears the drawings and keeps the background", "L2 Cmd+Z brings them back; clearing an empty canvas adds no history step", "L3 the クリア button does the same"] { rec(id, "blocked", "keyboard guard: \(why)") }
+} else if let cf = canvasFrame() {
+    let W = Double(cf.width), H = Double(cf.height)
+    canvasWidthPt = W
+    let y = H - 18   // 背景（下半分は緑）の上に、黒い線を引く
+    _ = selectTool(0)
+    /// (線が見える, 背景が見える)。背景は、貼り付けた画像の外側（左端）の、背景画像の左上（赤）で見る。
+    func state() -> (stroke: Bool, background: Bool)? {
+        guard let r = exportImg() else { return nil }
+        return (isDark(darkest(r, W * 0.5, y)), isRedish(at(r, W * 0.05, H * 0.3)))
+    }
+    if drag(line(pt(W * 0.2, y), pt(W * 0.8, y)), pid: pid), let before = state() {
+        key(40, .maskCommand)
+        let after = state()
+        rec("L1 Cmd+K clears the drawings and keeps the background", (before.stroke && before.background && after?.stroke == false && after?.background == true) ? "pass" : "fail",
+            "before: stroke=\(before.stroke) background=\(before.background); after Cmd+K: stroke=\(String(describing: after?.stroke)) background=\(String(describing: after?.background))")
+
+        key(40, .maskCommand)   // もう一度。消すものが無いので、何も起きず、履歴にも積まない
+        key(6, .maskCommand)    // 取り消しは、クリアの前（線がある状態）へ戻る。履歴が 1 段余計に積まれていれば、まだ線は無い
+        let undone = state()
+        rec("L2 Cmd+Z brings them back; clearing an empty canvas adds no history step", (undone?.stroke == true && undone?.background == true) ? "pass" : "fail",
+            "after Cmd+K, Cmd+K, Cmd+Z: stroke=\(String(describing: undone?.stroke)) background=\(String(describing: undone?.background))")
+
+        if let button = clearButtonElement(), AXUIElementPerformAction(button, kAXPressAction as CFString) == .success {
+            usleep(300_000)
+            let cleared = state()
+            key(6, .maskCommand)
+            let restored = state()
+            rec("L3 the クリア button does the same", (cleared?.stroke == false && cleared?.background == true && restored?.stroke == true) ? "pass" : "fail",
+                "after pressing: stroke=\(String(describing: cleared?.stroke)) background=\(String(describing: cleared?.background)); after Cmd+Z: stroke=\(String(describing: restored?.stroke))")
+        } else { rec("L3 the クリア button does the same", "fail", "no AXButton titled クリア was found, or AXPress failed\n" + dumpTree(app)) }
+    } else { rec("L1-L3 clear", "blocked", "pointer guard refused the stroke, or the export failed") }
+    canvasWidthPt = 480
+} else { rec("L1-L3 clear", "blocked", "canvas frame unavailable") }
+
 // Esc last
 if keyGuard(pid, app) == nil {
     key(53, [])

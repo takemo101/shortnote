@@ -34,6 +34,7 @@ struct KeyBindings: Equatable {
             .hidePanel: [chord(53, "Esc")],
             .undo: [chord(6, .command, "Z"), chord(6, .control, "Z")],
             .redo: [chord(6, [.command, .shift], "Z"), chord(6, [.control, .shift], "Z")],
+            .clearCanvas: [chord(40, .command, "K")],
             .pasteImage: [chord(9, .command, "V")],
             .openImage: [chord(31, .command, "O")],
             .copyPath: [chord(8, [.command, .shift], "C")],
