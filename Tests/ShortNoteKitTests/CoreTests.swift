@@ -5,6 +5,12 @@ import Testing
 
 private let black = CGColor(gray: 0, alpha: 1)
 
+private func tinyImage() -> ImportedImage {
+    let ctx = CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    return ImportedImage(cgImage: ctx.makeImage()!, pointSize: CGSize(width: 2, height: 2))
+}
+
 private func rectItem(_ r: CGRect, size: CGFloat = 4) -> Item {
     Item(content: .rect(r), color: black, size: size)
 }
@@ -75,11 +81,20 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
     }
 
     @Test func translated_movesEveryKindWithoutChangingTheOriginal() {
-        let original = penItem([(0, 0), (10, 10)])
-        let moved = original.translated(by: CGSize(width: 5, height: -3))
-        #expect(moved.bounds.origin.x == original.bounds.origin.x + 5)
-        #expect(moved.bounds.origin.y == original.bounds.origin.y - 3)
-        #expect(original.bounds.origin == CGPoint(x: -2, y: -2))   // 元の値は変わらない
+        let tiny = tinyImage()
+        let items: [Item] = [
+            penItem([(0, 0), (10, 10)]),
+            rectItem(CGRect(x: 5, y: 5, width: 20, height: 10)),
+            Item(content: .ellipse(CGRect(x: 5, y: 5, width: 20, height: 10)), color: black, size: 4),
+            Item(content: .text("hi", box: CGRect(x: 5, y: 5, width: 20, height: 10)), color: black, size: 18),
+            Item(content: .image(tiny, box: CGRect(x: 5, y: 5, width: 20, height: 10)), color: black, size: 0),
+        ]
+        for original in items {
+            let before = original.bounds
+            let moved = original.translated(by: CGSize(width: 5, height: -3))
+            #expect(moved.bounds == before.offsetBy(dx: 5, dy: -3))
+            #expect(original.bounds == before)   // 元の値は変わらない
+        }
     }
 
     @Test func appending_keepsThePreviousDocumentUntouched() {
@@ -132,7 +147,8 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
 
     @Test func parse_rejectsWhatDoesNotFitTheScreen() {
         #expect(CanvasSize.parse(width: 4002, height: 700, limits: wide) == .failure(.exceedsLimits(wide)))
-        #expect(CanvasSize.parse(width: 4000, height: 2400, limits: wide) != .failure(.exceedsLimits(wide)))
+        guard case .success(let size) = CanvasSize.parse(width: 4000, height: 2400, limits: wide) else { Issue.record("上限ちょうどのサイズは有効なはず"); return }
+        #expect(size.width == 4000 && size.height == 2400)
     }
 
     @Test func limits_areEvenAndNeverExceedTheExportCap() {
@@ -153,10 +169,6 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
     @Test func fitting_neverGoesBelowTheMinimumEvenOnATinyScreen() {
         let tiny = CanvasSize.Limits(availablePoints: CGSize(width: 100, height: 100))
         #expect(CanvasSize.fitting(CanvasSize.presets[1].size, in: tiny) == .minimum)
-    }
-
-    @Test func points_areHalfThePixels() {
-        #expect(CanvasSize.minimum.points == CGSize(width: 480, height: 320))
     }
 
     @Test func everyPresetIsAValidSize() {

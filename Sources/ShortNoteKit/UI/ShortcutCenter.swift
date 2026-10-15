@@ -1,7 +1,7 @@
 import Foundation
 
 /// ショートカットの割り当ての窓口。変更は保存し、変更を知りたい側（全域ホットキーの再登録、メニューの表示）へ知らせる。
-/// ウィンドウや View は、`KeyBindings` の中身を知らず、ここを通して解決・変更する。
+/// キーの振り分けは `KeyRouter` が `bindings` を読んで行い、ウィンドウは、変更をここを通して行う。
 final class ShortcutCenter {
     private(set) var bindings: KeyBindings
     private let store: KeyBindingsStore
@@ -36,19 +36,19 @@ final class ShortcutCenter {
         bindings.isCustomized(command)
     }
 
-    var hasCustomizations: Bool { bindings.hasCustomizations }
-
-    func command(for chord: KeyChord, whileEditingText: Bool) -> Command? {
-        bindings.command(for: chord, whileEditingText: whileEditingText)
-    }
-
     /// `command` の割り当てを `chord` だけに置き換える。他のコマンドと重なる・予約済みなどのときは、理由を返して何も変えない。
     func assign(_ chord: KeyChord, to command: Command) -> Result<Void, KeyBindings.AssignError> {
         bindings.assigning(chord, to: command).map { apply($0) }
     }
 
     func clear(_ command: Command) { apply(bindings.clearing(command)) }
-    func reset(_ command: Command) { apply(bindings.resetting(command)) }
+
+    /// `command` を初期値に戻す。初期値のキーを他のコマンドが使っているときは、理由を返して何も変えない。
+    func reset(_ command: Command) -> Result<Void, KeyBindings.AssignError> {
+        bindings.resetting(command).map { apply($0) }
+    }
+
+
     func resetAll() { apply(bindings.resettingAll()) }
 
     private func apply(_ new: KeyBindings) {

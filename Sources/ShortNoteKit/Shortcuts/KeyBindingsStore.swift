@@ -4,10 +4,13 @@ import Foundation
 struct KeyBindingsStore {
     private let defaults: UserDefaults
     private let key: String
+    private let defaultChords: [Command: [KeyChord]]
 
-    init(defaults: UserDefaults = .standard, key: String = "keyBindings") {
+    /// `defaultChords` は、現在のキーボード配列での既定（`KeyBindings.standardDefaults`）。
+    init(defaults: UserDefaults = .standard, key: String = "keyBindings", defaultChords: [Command: [KeyChord]] = KeyBindings.defaults) {
         self.defaults = defaults
         self.key = key
+        self.defaultChords = defaultChords
     }
 
     struct Loaded: Equatable {
@@ -18,10 +21,10 @@ struct KeyBindingsStore {
 
     func load() -> Loaded {
         guard let data = defaults.data(forKey: key) else {
-            return Loaded(bindings: KeyBindings(), issue: nil)
+            return Loaded(bindings: KeyBindings(defaultChords: defaultChords), issue: nil)
         }
         guard let stored = try? JSONDecoder().decode([String: [KeyChord]].self, from: data) else {
-            return Loaded(bindings: KeyBindings(), issue: "保存されたショートカット設定を読み込めなかったため、初期設定に戻しました。")
+            return Loaded(bindings: KeyBindings(defaultChords: defaultChords), issue: "保存されたショートカット設定を読み込めなかったため、初期設定に戻しました。")
         }
 
         var ignored = false
@@ -33,7 +36,7 @@ struct KeyBindingsStore {
         // 上書きされないコマンドの既定キーは有効なままなので、それとぶつかる上書きは落とす
         // （入れ替え "1"↔"2" のように、上書きされる側の既定キーは空くので除外する）。
         var taken = Set(
-            Command.allCases.filter { overrides[$0] == nil }.flatMap { KeyBindings.defaults[$0] ?? [] }
+            Command.allCases.filter { overrides[$0] == nil }.flatMap { defaultChords[$0] ?? [] }
         )
         var accepted: [Command: [KeyChord]] = [:]
         // 辞書の順序は不定なので Command.allCases 順に処理し、競合時にどちらを落とすかを決定的にする。
@@ -49,10 +52,10 @@ struct KeyBindingsStore {
                 kept.append(chord)
             }
             // 既定と同じ内容は差分ではないので保持しない（KeyBindings の不変条件）。
-            if kept != KeyBindings.defaults[command] { accepted[command] = kept }
+            if kept != defaultChords[command] { accepted[command] = kept }
         }
         return Loaded(
-            bindings: KeyBindings(overrides: accepted),
+            bindings: KeyBindings(overrides: accepted, defaultChords: defaultChords),
             issue: ignored ? "一部のショートカット設定が無効だったため無視しました。" : nil
         )
     }

@@ -146,7 +146,15 @@ if bundleIdOK, !NSRunningApplication.runningApplications(withBundleIdentifier: b
 func readDefault(_ k: String) -> String? { let r = sh(["defaults", "read", bundleId, k]); return r.0 == 0 ? r.1.trimmingCharacters(in: .whitespacesAndNewlines) : nil }
 let origDefaults: [String: String?] = bundleIdOK ? ["canvasWidthPx": readDefault("canvasWidthPx"), "canvasHeightPx": readDefault("canvasHeightPx")] : [:]
 if bundleIdOK { sh(["defaults", "write", bundleId, "canvasWidthPx", "-int", "960"]); sh(["defaults", "write", bundleId, "canvasHeightPx", "-int", "640"]) }
-// ショートカットの保存先も隔離する（検証用 bundle ID のドメインだけ。利用者の設定ではない）。実行前後に消す。
+// ショートカットの保存先も隔離する。実行前の値を控え、実行前に消し、終了時に元へ戻す（canvas のサイズと同じ扱い）。
+// 値は Data なので、`defaults export` の plist から取り、`-data` の 16 進で書き戻す。
+func readKeyBindingsData() -> Data? {
+    let r = sh(["defaults", "export", bundleId, "-"])
+    guard r.0 == 0, let d = r.1.data(using: .utf8),
+          let plist = try? PropertyListSerialization.propertyList(from: d, format: nil) as? [String: Any] else { return nil }
+    return plist["keyBindings"] as? Data
+}
+let origKeyBindings: Data? = bundleIdOK ? readKeyBindingsData() : nil
 if bundleIdOK { sh(["defaults", "delete", bundleId, "keyBindings"]) }
 let proc = Process(); proc.executableURL = URL(fileURLWithPath: buildExe); proc.arguments = ["\(work)/teal.png"]
 proc.standardOutput = FileHandle(forWritingAtPath: "/dev/null"); proc.standardError = FileHandle(forWritingAtPath: "\(work)/cand.log") ?? FileHandle.nullDevice
@@ -161,7 +169,10 @@ rec("C0 candidate identity", exePath == buildExe ? "pass" : "fail", "pid \(pid),
 func finish() -> Never {
     // キャンバスサイズの設定を、実行前の状態へ戻す（ユーザーの設定を残さない）
     if bundleIdOK { for (k, v) in origDefaults { if let v { sh(["defaults", "write", bundleId, k, "-int", v]) } else { sh(["defaults", "delete", bundleId, k]) } } }
-    if bundleIdOK { sh(["defaults", "delete", bundleId, "keyBindings"]) }
+    if bundleIdOK {
+        sh(["defaults", "delete", bundleId, "keyBindings"])
+        if let d = origKeyBindings { sh(["defaults", "write", bundleId, "keyBindings", "-data", d.map { String(format: "%02x", $0) }.joined()]) }
+    }
     if let pf = prevFront, pf.processIdentifier != pid { pf.activate(options: []) }
     if let u = userPB { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u, forType: .string) }
     let psStart = sh(["ps", "-p", "\(pid)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -703,6 +714,18 @@ if let why = keyGuard(pid, app) {
                 cancelled = wait(2) { scText("keys-toolEllipse") == "2" } && shortcutsWin() != nil
                 rec("K8 Esc cancels recording without closing the window", cancelled ? "pass" : "fail", "ellipse now=\(scText("keys-toolEllipse")) window open=\(shortcutsWin() != nil)")
             } else { rec("K8 Esc cancels recording", "blocked", "could not start recording") }
+
+            // 初期値に戻すときの重なり：ペンは P に変えてある（1 は空いている）。円に 1 を割り当てたあとで、ペンを初期値に戻そうとすると、1 が重なるので拒否する。
+            if scPress("change-toolEllipse"), wait(2, { scText("keys-toolEllipse").contains("キーを押して") }), shortcutsGuard() == nil {
+                key(18, [])   // 1
+                let moved = wait(2) { scText("keys-toolEllipse") == "1" }
+                let pressedReset = scPress("reset-toolPen")
+                usleep(300_000)
+                let m = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
+                let refused = m.contains("ツール: 円") && scText("keys-toolPen") == "P" && scText("keys-toolEllipse") == "1"
+                rec("K10 'reset' is refused while another command holds the default key, and nothing changes", (moved && pressedReset && refused) ? "pass" : "fail",
+                    "ellipse took 1=\(moved) reset pressed=\(pressedReset) message='\(m)' pen now=\(scText("keys-toolPen")) ellipse now=\(scText("keys-toolEllipse"))")
+            } else { rec("K10 reset conflict", "blocked", "could not start recording") }
 
             // すべて初期値に戻す
             let pressed = scPress("shortcuts-reset-all")

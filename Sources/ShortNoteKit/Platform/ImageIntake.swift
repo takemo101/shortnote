@@ -24,6 +24,13 @@ enum ImageIntake {
         return images.isEmpty ? .failure(.noImage) : .success(images)
     }
 
+    /// 明示的に 1 つ指定された画像（CLI 引数・`open`）。ファイルの種類で絞らず、`NSImage` が読めるものを読む（PDF なども開ける）。
+    /// 貼り付け・ドロップのように、無関係なファイルが混ざる経路ではないので、絞らない。
+    static func image(at url: URL) -> Result<ImportedImage, ImageIntakeError> {
+        guard let image = NSImage(contentsOf: url).flatMap(imported) else { return .failure(.noImage) }
+        return .success(image)
+    }
+
     /// ドラッグがキャンバスに落とせるか（落とす前の判定。画像を読み込まずに、型だけで見る）。
     static func canAccept(_ pasteboard: NSPasteboard) -> Bool {
         let urls = fileURLs(in: pasteboard)
@@ -46,8 +53,29 @@ enum ImageIntake {
 
     /// `NSImage` を、描画用の `CGImage` とポイント単位の大きさにする。大きさが 0 のもの・`CGImage` にできないものは捨てる。
     private static func imported(_ image: NSImage) -> ImportedImage? {
-        guard image.isValid, image.size.width > 0, image.size.height > 0,
-              let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+        guard image.isValid, image.size.width > 0, image.size.height > 0, let cg = cgImage(of: image) else { return nil }
         return ImportedImage(cgImage: cg, pointSize: image.size)
+    }
+
+    /// ビットマップの画像は、いちばん大きい表現の画素をそのまま使う（再描画で劣化させない。EXIF の向きは、表現の側で適用済み）。
+    /// PDF などのベクター画像は、書き出しの倍率（`CanvasSize.exportScale`）の画素数に描く（画面の倍率に依らず、同じ結果にするため、
+    /// `NSImage.cgImage(forProposedRect:)` は使わない）。
+    private static func cgImage(of image: NSImage) -> CGImage? {
+        let bitmaps = image.representations.compactMap { $0 as? NSBitmapImageRep }
+        if let largest = bitmaps.max(by: { $0.pixelsWide * $0.pixelsHigh < $1.pixelsWide * $1.pixelsHigh }) {
+            return largest.cgImage
+        }
+        let scale = CGFloat(CanvasSize.exportScale)
+        let width = Int((image.size.width * scale).rounded(.up)), height = Int((image.size.height * scale).rounded(.up))
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
+            hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ), let context = NSGraphicsContext(bitmapImageRep: rep) else { return nil }
+        NSGraphicsContext.saveGraphicsState()
+        defer { NSGraphicsContext.restoreGraphicsState() }
+        NSGraphicsContext.current = context
+        context.imageInterpolation = .high
+        image.draw(in: NSRect(x: 0, y: 0, width: width, height: height))
+        return rep.cgImage
     }
 }

@@ -28,7 +28,18 @@ import Testing
     @Test func commandKeysStillWorkWhileEditing() {
         #expect(route(chord(.undo), editing: true) == .run(.undo))
         #expect(route(chord(.pasteImage), editing: true) == .run(.pasteImage))
-        #expect(route(chord(.hidePanel), editing: true) == .run(.hidePanel))
+    }
+
+    @Test func escCancelsTextEditingEvenWhenHidePanelIsReassignedOrCleared() throws {
+        let esc = chord(.hidePanel)
+        let cmdPeriod = KeyChord(keyCode: 47, modifiers: .command, label: ".")
+        let moved = try #require(try? defaults.assigning(cmdPeriod, to: .hidePanel).get())
+        #expect(route(esc, editing: true) == .cancelTextEditing)
+        #expect(route(esc, editing: true, bindings: moved) == .cancelTextEditing)
+        #expect(route(esc, editing: true, bindings: defaults.clearing(.hidePanel)) == .cancelTextEditing)
+        #expect(route(esc, editing: false, bindings: moved) == .passThrough)      // 入力中でなければ、Esc はただの Esc
+        #expect(route(cmdPeriod, editing: true, bindings: moved) == .run(.hidePanel))
+        #expect(route(esc, editing: false) == .run(.hidePanel))
     }
 
     @Test func standardEditingKeysGoToTheTextViewOnlyWhileEditing() {

@@ -6,7 +6,10 @@ private let openNotification = Notification.Name("\(Bundle.main.bundleIdentifier
 
 /// 起動と終了、常駐インスタンスへの引き渡し、全域ホットキー、メニューとウィンドウの結びつけ。
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let shortcuts = ShortcutCenter()
+    // `[` `]` の既定は、いまのキーボード配列（US・JIS など）で、その文字を出すキーにする。
+    private let shortcuts = ShortcutCenter(store: KeyBindingsStore(
+        defaultChords: KeyBindings.standardDefaults(characterForKeyCode: KeyboardLayout.character(forKeyCode:))
+    ))
     // `open` 経由の起動では application(_:open:) が didFinishLaunching より先に来るため lazy。
     private lazy var controller = PaintWindowController(center: shortcuts)
     private lazy var shortcutsWindow = ShortcutsWindowController(center: shortcuts)

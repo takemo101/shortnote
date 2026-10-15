@@ -39,10 +39,13 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
 
     func show() {
         if !window.isVisible { window.center() }
+        var notices: [String] = []
         if !loadIssueShown, let issue = center.loadIssue {
             loadIssueShown = true
-            showMessage(issue, isError: true)
+            notices.append(issue)
         }
+        if let warning = globalKeyWarning() { notices.append(warning) }
+        if !notices.isEmpty { showMessage(notices.joined(separator: "\n"), isError: true) }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -172,20 +175,22 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         guard let command = command(of: sender) else { return }
         endRecording()
         center.clear(command)
-        showMessage("「\(command.title)」のキーをなしにしました。", isError: false)
+        showSuccess("「\(command.title)」のキーをなしにしました。")
     }
 
     @objc private func resetPressed(_ sender: NSButton) {
         guard let command = command(of: sender) else { return }
         endRecording()
-        center.reset(command)
-        showMessage("「\(command.title)」を初期値に戻しました。", isError: false)
+        switch center.reset(command) {
+        case .success: showSuccess("「\(command.title)」を初期値に戻しました。")
+        case .failure(let error): showMessage(Self.reason(error), isError: true)
+        }
     }
 
     @objc private func resetAllPressed() {
         endRecording()
         center.resetAll()
-        showMessage("すべて初期値に戻しました。", isError: false)
+        showSuccess("すべて初期値に戻しました。")
     }
 
     private func command(of sender: NSButton) -> Command? {
@@ -220,11 +225,7 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         endRecording()
         switch result {
         case .success:
-            if command.isGlobal, !center.isGlobalKeyRegistered {
-                showMessage("\(chord.displayString) は登録できませんでした。他のアプリが使っている可能性があります。別のキーにしてください。", isError: true)
-            } else {
-                showMessage("「\(command.title)」を \(chord.displayString) にしました。", isError: false)
-            }
+            showSuccess("「\(command.title)」を \(chord.displayString) にしました。")
         case .failure(let error):
             showMessage(Self.reason(error), isError: true)
         }
@@ -244,7 +245,7 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         switch error {
         case .conflict(let other): return "「\(other.title)」がすでに使っているキーです。先にそちらを変更するか「なし」にしてください。割り当ては変えていません。"
         case .reserved: return "このキーは OS や文字入力で使われるため、割り当てられません。割り当ては変えていません。"
-        case .globalNeedsModifier: return "全域ショートカットには ⌃ ⌥ ⌘ のいずれかが必要です（他のアプリの入力を奪わないため）。割り当ては変えていません。"
+        case .globalNeedsModifier: return "全域ショートカットには ⌃ ⌥ ⌘ のいずれか（または F キー）が必要です（他のアプリの入力を奪わないため）。割り当ては変えていません。"
         }
     }
 
@@ -253,9 +254,31 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         message.textColor = isError ? .systemRed : .secondaryLabelColor
     }
 
+    /// 操作の成功を知らせる。ただし、全域ホットキーを登録できていないときは、そちらを優先して知らせる
+    /// （「初期値」や「すべて初期値に戻す」でも、登録し直しの結果が変わるため）。
+    private func showSuccess(_ text: String) {
+        if let warning = globalKeyWarning() {
+            showMessage(warning, isError: true)
+        } else {
+            showMessage(text, isError: false)
+        }
+    }
+
+    private func globalKeyWarning() -> String? {
+        guard !center.isGlobalKeyRegistered, let chord = center.chords(for: .showPanel).first else { return nil }
+        return "ウィンドウを出すキー \(chord.displayString) を登録できませんでした。他のアプリが使っている可能性があります。別のキーにしてください。"
+    }
+
     // MARK: - NSWindowDelegate
 
     func windowWillClose(_ notification: Notification) {
         endRecording()
+    }
+
+    /// 別のウィンドウへ移ったら、記録を取り消す（記録中は全域ホットキーを外しているので、そのままにしない）。
+    func windowDidResignKey(_ notification: Notification) {
+        guard recording != nil else { return }
+        endRecording()
+        showMessage("別のウィンドウへ移ったので、キーの記録を取り消しました。", isError: false)
     }
 }

@@ -57,7 +57,7 @@ final class PaintWindowController: NSObject {
         toolbar.onColor = { [weak self] color in self?.canvas.color = color }
         toolbar.onBrushSize = { [weak self] size in self?.canvas.brushSize = size }
         toolbar.onTransparent = { [weak self] on in self?.canvas.transparent = on }
-        toolbar.onPickImages = { [weak self] in self?.perform(.openImage) }
+        toolbar.onPickImages = { [weak self] in self?.pickImages() }   // ボタンは入力中でも効く（入力を確定してから開く）。キーの openImage は、入力中は無視する
         toolbar.onCopyPath = { [weak self] in self?.perform(.copyPath) }
         toolbar.fileProvider = { [weak self] in self?.exportFile() }
 
@@ -112,6 +112,9 @@ final class PaintWindowController: NSObject {
             case .cut: forwardToText(#selector(NSText.cut(_:)))
             case .selectAll: forwardToText(#selector(NSText.selectAll(_:)))
             }
+            return true
+        case .cancelTextEditing:
+            canvas.cancelEditing()
             return true
         case .run(let command):
             perform(command)

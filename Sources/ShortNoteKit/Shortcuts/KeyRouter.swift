@@ -6,6 +6,8 @@ enum KeyAction: Equatable {
     case passThrough
     /// 文字入力欄の標準の編集操作。入力中だけ、入力欄へ渡す。
     case textEditing(TextEditingKey)
+    /// 文字入力中の素の Esc。入力の取り消しで、割り当てを変えられない（SPEC 3.3.1）。
+    case cancelTextEditing
     /// コマンドを実行する。
     case run(Command)
 }
@@ -21,6 +23,7 @@ enum KeyRouter {
         // 日本語入力の変換中は、すべてのキーが入力システムのもの（Esc は変換だけを取り消し、入力中の文字は消さない）。
         if isComposingText { return .passThrough }
 
+        if isEditingText, chord.modifiers.isEmpty, chord.keyCode == escapeKeyCode { return .cancelTextEditing }
         if isEditingText, chord.modifiers == .command, let key = textEditingKeys[chord.keyCode] {
             return .textEditing(key)
         }
@@ -30,4 +33,5 @@ enum KeyRouter {
 
     /// ⌘C / ⌘X / ⌘A のキーコード。
     private static let textEditingKeys: [UInt16: TextEditingKey] = [8: .copy, 7: .cut, 0: .selectAll]
+    private static let escapeKeyCode: UInt16 = 53
 }

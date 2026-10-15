@@ -1,5 +1,7 @@
 import AppKit
 import Foundation
+import ImageIO
+import UniformTypeIdentifiers
 import Testing
 @testable import ShortNoteKit
 
@@ -139,20 +141,66 @@ private func pixel(_ rep: NSBitmapImageRep, _ x: Int, _ y: Int) -> (r: Double, g
         return dir
     }
 
-    private func writePNG(to url: URL, width: Int = 20, height: Int = 10) throws {
+    /// `points` を指定すると、同じ画素数で、解像度を上げた PNG（画素 ÷ ポイント = 2 なら Retina の 144 dpi）になる。
+    private func writePNG(to url: URL, width: Int = 20, height: Int = 10, points: CGSize? = nil) throws {
         let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8, samplesPerPixel: 4,
                                    hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        if let points { rep.size = points }
         try rep.representation(using: .png, properties: [:])!.write(to: url)
     }
 
-    @Test func images_readsAPngWithItsPointSize() throws {
+    private func writePDF(to url: URL, width: CGFloat, height: CGFloat) {
+        var box = CGRect(x: 0, y: 0, width: width, height: height)
+        let ctx = CGContext(url as CFURL, mediaBox: &box, nil)!
+        ctx.beginPDFPage(nil)
+        ctx.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+        ctx.fill(box)
+        ctx.endPDFPage()
+        ctx.closePDF()
+    }
+
+    @Test func images_readsAPngWithItsPixelsAndPointSize() throws {
         let dir = try makeDirectory(); defer { try? FileManager.default.removeItem(at: dir) }
         let url = dir.appendingPathComponent("a.png")
         try writePNG(to: url, width: 20, height: 10)
         let images = try ImageIntake.images(at: [url]).get()
         #expect(images.count == 1)
-        #expect(images[0].pointSize.width > 0 && images[0].pointSize.height > 0)
         #expect(images[0].cgImage.width == 20 && images[0].cgImage.height == 10)
+    }
+
+    @Test func images_ofARetinaPngAreHalfTheirPixelsInPoints() throws {
+        // 配置の大きさ（キャンバスの 70% への縮小）は、ポイント数で決まる。Retina 画像を画素数のまま扱うと、2 倍の大きさで置かれる。
+        let dir = try makeDirectory(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("retina.png")
+        try writePNG(to: url, width: 40, height: 20, points: CGSize(width: 20, height: 10))
+        let image = try ImageIntake.images(at: [url]).get()[0]
+        #expect(image.pointSize == CGSize(width: 20, height: 10))
+        #expect(image.cgImage.width == 40 && image.cgImage.height == 20)
+    }
+
+    @Test func image_atAnExplicitPathOpensAPdfAtExportResolutionButBatchIntakeIgnoresIt() throws {
+        // CLI 引数・`open` で明示された PDF は背景として開ける（以前の挙動）。貼り付け・ドロップの経路は、画像でないファイルを拾わない。
+        let dir = try makeDirectory(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("doc.pdf")
+        writePDF(to: url, width: 100, height: 50)
+        let image = try ImageIntake.image(at: url).get()
+        #expect(image.pointSize == CGSize(width: 100, height: 50))
+        #expect(image.cgImage.width == 200 && image.cgImage.height == 100, "actual \(image.cgImage.width)x\(image.cgImage.height)")   // 書き出しの倍率（2 倍）で画素にする
+        guard case .failure(.noImage) = ImageIntake.images(at: [url]) else { Issue.record("PDF は一括の取り込みでは拾わないはず"); return }
+    }
+
+    @Test func images_ofARotatedJpegAreUprightAndMatchTheirPointSize() throws {
+        // EXIF の向き 6（90° 回して表示）。横長 40×20 の画素が、縦長 20×40 として取り込まれる（画像の向きが崩れない）。
+        let dir = try makeDirectory(); defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("o6.jpg")
+        let source = CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8, bytesPerRow: 0,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        let destination = try #require(CGImageDestinationCreateWithURL(url as CFURL, UTType.jpeg.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, source.makeImage()!, [kCGImagePropertyOrientation: 6] as CFDictionary)
+        #expect(CGImageDestinationFinalize(destination))
+        let image = try ImageIntake.images(at: [url]).get()[0]
+        #expect(image.pointSize == CGSize(width: 20, height: 40))
+        #expect(image.cgImage.width == 20 && image.cgImage.height == 40)
     }
 
     @Test func images_ignoresFilesThatAreNotImages() throws {

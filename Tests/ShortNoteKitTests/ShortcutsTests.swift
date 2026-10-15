@@ -39,10 +39,6 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
             #expect(KeyBindings.defaults[command, default: []].allSatisfy { $0.isGlobalSafe })
         }
     }
-
-    @Test func onlyShowPanelIsGlobal() {
-        #expect(Command.allCases.filter(\.isGlobal) == [.showPanel])
-    }
 }
 
 @Suite struct LookupTests {
@@ -125,11 +121,28 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
 
     @Test func resetting() throws {
         let b = try KeyBindings().assigning(chord(40, .command, "K"), to: .undo).get().clearing(.toolPen)
-        let one = b.resetting(.undo)
+        let one = try b.resetting(.undo).get()
         #expect(!one.isCustomized(.undo))
         #expect(one.isCustomized(.toolPen))
         #expect(b.resettingAll() == KeyBindings())
         #expect(!b.resettingAll().hasCustomizations)
+    }
+
+    @Test func resettingIsRefusedWhileAnotherCommandHoldsTheDefaultKey() throws {
+        // ペンのキー 1 を外し、円に 1 を割り当てる。そのあとペンを初期値に戻すと、1 が 2 つのコマンドに重なってしまう。
+        var b = KeyBindings().clearing(.toolPen)
+        b = try b.assigning(one, to: .toolEllipse).get()
+        #expect(b.resetting(.toolPen) == .failure(.conflict(.toolEllipse)))
+        // 円を先に戻す（円の既定は 2。1 は空く）と、ペンも戻せる。
+        let freed = try b.resetting(.toolEllipse).get()
+        #expect(try freed.resetting(.toolPen).get() == KeyBindings())
+    }
+
+    @Test func resettingTheGlobalCommandIsRefusedWhenItsDefaultKeyIsTaken() throws {
+        let ctrlOptN = chord(45, [.control, .option], "N")
+        var b = KeyBindings().clearing(.showPanel)
+        b = try b.assigning(ctrlOptN, to: .hidePanel).get()
+        #expect(b.resetting(.showPanel) == .failure(.conflict(.hidePanel)))
     }
 }
 
@@ -214,7 +227,7 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
             #expect(loaded.bindings.chords(for: .toolPen) == [one])
             #expect(loaded.bindings.chords(for: .undo).map(\.displayString) == ["⌘K"])
             #expect(!loaded.bindings.chords(for: .toolText).contains(chord(8, .command, "C")))
-            #expect(!loaded.bindings.chords(for: .toolRect).contains(one))
+            #expect(loaded.bindings.chords(for: .toolRect).isEmpty)   // 重なって無効になったコマンドは、既定の 3 に戻らず、割り当てなしになる
         }
     }
 
@@ -235,6 +248,68 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
             #expect(ud.data(forKey: "keyBindings") != nil)
             store.save(KeyBindings())
             #expect(ud.object(forKey: "keyBindings") == nil)
+        }
+    }
+}
+
+// MARK: - キーボード配列ごとの既定（`[` `]`）
+
+@Suite struct LayoutDefaultsTests {
+    /// US 配列: `[` は 33、`]` は 30。JIS 配列: 33 は `@`、`[` は 30、`]` は 42。
+    private let us: [UInt16: String] = [33: "[", 30: "]"]
+    private let jis: [UInt16: String] = [33: "@", 30: "[", 42: "]"]
+
+    @Test func bracketKeysFollowTheLayout() throws {
+        let onJIS = KeyBindings.standardDefaults(characterForKeyCode: { jis[$0] })
+        #expect(onJIS[.brushSmaller] == [chord(30, "[")])
+        #expect(onJIS[.brushLarger] == [chord(42, "]")])
+        #expect(onJIS[.brushSmaller]?.first?.label == "[" && onJIS[.brushLarger]?.first?.label == "]")   // 表示は、どの配列でも [ ]
+
+        let onUS = KeyBindings.standardDefaults(characterForKeyCode: { us[$0] })
+        #expect(onUS == KeyBindings.defaults)
+    }
+
+    @Test func bracketKeysFallBackToTheUSPositionsWhenTheLayoutCannotBeRead() {
+        #expect(KeyBindings.standardDefaults(characterForKeyCode: { _ in nil }) == KeyBindings.defaults)
+    }
+
+    @Test func onlyTheBracketKeysDependOnTheLayout() {
+        let onJIS = KeyBindings.standardDefaults(characterForKeyCode: { jis[$0] })
+        for command in Command.allCases where command != .brushSmaller && command != .brushLarger {
+            #expect(onJIS[command] == KeyBindings.defaults[command])
+        }
+    }
+
+    @Test func bindingsOnAnotherLayoutResolveThatLayoutsKeys() {
+        let b = KeyBindings(defaultChords: KeyBindings.standardDefaults(characterForKeyCode: { jis[$0] }))
+        #expect(b.command(for: chord(30, "["), whileEditingText: false) == .brushSmaller)
+        #expect(b.command(for: chord(42, "]"), whileEditingText: false) == .brushLarger)
+        #expect(b.command(for: chord(33, "@"), whileEditingText: false) == nil)   // JIS の @ キーは、ブラシのキーではない
+    }
+
+    @Test func savedOverridesAreKeptAndLayoutDefaultsAreNotSaved() throws {
+        let name = "ShortNoteTests.\(UUID().uuidString)"
+        let ud = try #require(UserDefaults(suiteName: name)); defer { ud.removePersistentDomain(forName: name) }
+        let layoutDefaults = KeyBindings.standardDefaults(characterForKeyCode: { jis[$0] })
+        let store = KeyBindingsStore(defaults: ud, defaultChords: layoutDefaults)
+
+        let changed = try KeyBindings(defaultChords: layoutDefaults).assigning(chord(35, "P"), to: .toolPen).get()
+        store.save(changed)
+        let json = String(decoding: try #require(ud.data(forKey: "keyBindings")), as: UTF8.self)
+        #expect(!json.contains("brush"))   // 既定との差分だけを保存する。配列由来の既定は保存しない
+
+        let loaded = store.load()
+        #expect(loaded.issue == nil)
+        #expect(loaded.bindings == changed)
+        #expect(loaded.bindings.chords(for: .brushLarger) == [chord(42, "]")])
+    }
+
+    @Test func theDefaultsOfTheRealLayoutNeverCollideOrUseReservedKeys() {
+        // この Mac の、いまの配列で解決した既定。どの配列でも、既定どうしが重ならず、予約済みのキーも使わない。
+        let b = KeyBindings(defaultChords: KeyBindings.standardDefaults(characterForKeyCode: KeyboardLayout.character(forKeyCode:)))
+        #expect(!hasConflict(b))
+        for command in Command.allCases {
+            for c in b.chords(for: command) { #expect(!KeyBindings.reservedChords.contains(c)) }
         }
     }
 }

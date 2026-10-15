@@ -6,5 +6,6 @@ public func runShortNote() {
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.accessory)
-    app.run()
+    // NSApplication.delegate は弱参照。run() が戻るまで、delegate を確実に生かしておく。
+    withExtendedLifetime(delegate) { app.run() }
 }

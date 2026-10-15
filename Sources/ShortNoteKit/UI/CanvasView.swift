@@ -132,7 +132,7 @@ final class CanvasView: NSView {
     /// 画像を背景として開く（CLI 引数・`open`）。新しいキャンバスになる（直前の状態は取り消しで戻せる）。
     @discardableResult
     func loadImage(at url: URL) -> Bool {
-        guard case .success(let images) = ImageIntake.images(at: [url]), let image = images.first else { return false }
+        guard case .success(let image) = ImageIntake.image(at: url) else { return false }
         commitEditing()
         commit(Document(background: image, backgroundRect: fitted(image.pointSize)))
         return true
