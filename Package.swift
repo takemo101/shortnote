@@ -1,0 +1,11 @@
+// swift-tools-version:5.9
+import PackageDescription
+
+let package = Package(
+    name: "ShortNote",
+    platforms: [.macOS(.v13)],
+    targets: [
+        .executableTarget(name: "ShortNote", path: "Sources/ShortNote")
+    ],
+    swiftLanguageVersions: [.v5]
+)

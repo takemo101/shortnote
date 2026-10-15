@@ -1,0 +1,9 @@
+.build/
+build/
+.DS_Store
+
+# 開発ツール側の設定（プロジェクトの一部ではない）
+.omp/
+.sksync/
+sksync.config.json
+sksync-lock.json
