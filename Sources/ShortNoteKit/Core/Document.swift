@@ -32,6 +32,14 @@ struct Document {
         return copy
     }
 
+    /// 描いたもの（要素）をすべて消した文書を返す。背景画像は残す。消すものが無いときは `nil`（履歴に積む変更が無い）。
+    func clearingItems() -> Document? {
+        guard !items.isEmpty else { return nil }
+        var copy = self
+        copy.items = []
+        return copy
+    }
+
     /// `point` を囲む範囲を持つ、いちばん手前の要素の番号。無ければ `nil`。
     /// 円・四角・ペンの輪も、内側をクリックして掴める（囲む範囲で判定する）。
     func topItemIndex(at point: CGPoint, slop: CGFloat = 4) -> Int? {

@@ -59,6 +59,7 @@ final class PaintWindowController: NSObject {
         toolbar.onTransparent = { [weak self] on in self?.canvas.transparent = on }
         toolbar.onPickImages = { [weak self] in self?.pickImages() }   // ボタンは入力中でも効く（入力を確定してから開く）。キーの openImage は、入力中は無視する
         toolbar.onCopyPath = { [weak self] in self?.perform(.copyPath) }
+        toolbar.onClear = { [weak self] in self?.perform(.clearCanvas) }
         toolbar.fileProvider = { [weak self] in self?.exportFile() }
 
         // キャンバスだけが、ウィンドウの大きさに合わせて伸び縮みする（上下の帯は固定の高さ）。
@@ -140,6 +141,8 @@ final class PaintWindowController: NSObject {
             if editing { forwardToText(Selector(("undo:"))) } else { canvas.undo() }
         case .redo:
             if editing { forwardToText(Selector(("redo:"))) } else { canvas.redo() }
+        case .clearCanvas:
+            canvas.clearCanvas()
         case .pasteImage:
             if editing { forwardToText(#selector(NSText.paste(_:))) } else { canvas.pasteImages() }
         case .openImage:

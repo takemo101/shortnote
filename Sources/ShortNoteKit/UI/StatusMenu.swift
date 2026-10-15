@@ -14,7 +14,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     override init() {
         super.init()
-        statusItem.button?.image = NSImage(systemSymbolName: "pencil.tip.crop.circle", accessibilityDescription: "ShortNote")
+        statusItem.button?.image = Self.menuBarIcon()
 
         let menu = NSMenu()
         menu.addItem(item("ShortNote を開く", #selector(openPressed)))
@@ -40,6 +40,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
+    }
+
+    /// メニューバーのアイコン。アプリのバンドルに入れた単色の画像（`MenuBarIcon.png`。`scripts/make-icon.sh` で生成）を、
+    /// テンプレート画像として使う（ダーク／ライトのメニューバーに、色が追従する）。
+    /// バンドルの外（`swift run` など）では、画像が無いので、システムのシンボルで代える（開発用の経路だけ）。
+    static func menuBarIcon() -> NSImage {
+        if let url = Bundle.main.url(forResource: "MenuBarIcon", withExtension: "png"), let image = NSImage(contentsOf: url) {
+            image.size = NSSize(width: 18, height: 18)   // 画像は 72 px（4 倍）。ポイントの大きさを 18 にする
+            image.isTemplate = true
+            image.accessibilityDescription = "ShortNote"
+            return image
+        }
+        return NSImage(systemSymbolName: "pencil.tip.crop.circle", accessibilityDescription: "ShortNote") ?? NSImage()
     }
 
     /// 「ウィンドウを出す」全域キーの状態を表示する。

@@ -97,6 +97,28 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
         }
     }
 
+    @Test func clearingItems_removesEveryItemButKeepsTheBackground() {
+        let background = tinyImage()
+        let rect = CGRect(x: 3, y: 4, width: 50, height: 40)
+        let box = CGRect(x: 0, y: 0, width: 10, height: 10)
+        let doc = Document(background: background, backgroundRect: rect)
+            .appending(rectItem(box))
+            .appending(penItem([(0, 0), (5, 5)]))
+            .appending(Item(content: .ellipse(box), color: black, size: 4))
+            .appending(Item(content: .text("hi", box: box), color: black, size: 18))
+            .appending(Item(content: .image(tinyImage(), box: box), color: black, size: 0))
+        let cleared = doc.clearingItems()
+        #expect(cleared?.items.isEmpty == true)
+        #expect(cleared?.background != nil)
+        #expect(cleared?.backgroundRect == rect)
+        #expect(doc.items.count == 5)   // 元の値は変わらない（取り消しで戻せる）
+    }
+
+    @Test func clearingItems_hasNothingToDoOnAnEmptyCanvas() {
+        #expect(Document().clearingItems() == nil)
+        #expect(Document(background: tinyImage(), backgroundRect: .zero).clearingItems() == nil)   // 背景だけでも、消すものは無い
+    }
+
     @Test func appending_keepsThePreviousDocumentUntouched() {
         let empty = Document()
         let one = empty.appending(rectItem(CGRect(x: 0, y: 0, width: 10, height: 10)))

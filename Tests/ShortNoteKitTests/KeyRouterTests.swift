@@ -30,6 +30,12 @@ import Testing
         #expect(route(chord(.pasteImage), editing: true) == .run(.pasteImage))
     }
 
+    @Test func clearRunsEvenWhileEditingBecauseItCommitsTheTextFirst() {
+        #expect(route(chord(.clearCanvas)) == .run(.clearCanvas))
+        #expect(route(chord(.clearCanvas), editing: true) == .run(.clearCanvas))
+        #expect(route(chord(.clearCanvas), editing: true, composing: true) == .passThrough)   // 日本語入力の変換中は、入力システムのもの
+    }
+
     @Test func escCancelsTextEditingEvenWhenHidePanelIsReassignedOrCleared() throws {
         let esc = chord(.hidePanel)
         let cmdPeriod = KeyChord(keyCode: 47, modifiers: .command, label: ".")

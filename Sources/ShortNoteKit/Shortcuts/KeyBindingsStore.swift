@@ -33,16 +33,11 @@ struct KeyBindingsStore {
             if let command = Command(rawValue: name) { overrides[command] = chords } else { ignored = true }
         }
 
-        // 上書きされないコマンドの既定キーは有効なままなので、それとぶつかる上書きは落とす
-        // （入れ替え "1"↔"2" のように、上書きされる側の既定キーは空くので除外する）。
-        // ただし、キーボードの配列に合わせて決めた既定（US の位置と違うもの）は、利用者が保存した割り当てより弱い。
-        // キーボードの種類が変わっても、利用者が選んだキーが消えないように、重なるときは既定の側を外す（下で処理する）。
-        let layoutDerived = Set(Command.allCases.filter { defaultChords[$0] != KeyBindings.defaults[$0] })
-        var taken = Set(
-            Command.allCases.filter { overrides[$0] == nil && !layoutDerived.contains($0) }.flatMap { defaultChords[$0] ?? [] }
-        )
+        // 保存した割り当ては、上書きされないコマンドの既定より強い。利用者が選んだキーを、あとから足した既定
+        // （新しいコマンドの既定や、キーボードの種類で変わる配列由来の既定）が消さないように、重なるときは既定の側を外す（下で処理する）。
+        // 保存した割り当てどうしが重なるときは、Command.allCases 順の先を残す（辞書の順序は不定なので、決定的にするため）。
+        var taken = Set<KeyChord>()
         var accepted: [Command: [KeyChord]] = [:]
-        // 辞書の順序は不定なので Command.allCases 順に処理し、競合時にどちらを落とすかを決定的にする。
         for command in Command.allCases {
             guard let chords = overrides[command] else { continue }
             var kept: [KeyChord] = []
@@ -57,9 +52,9 @@ struct KeyBindingsStore {
             // 既定と同じ内容は差分ではないので保持しない（KeyBindings の不変条件）。
             if kept != defaultChords[command] { accepted[command] = kept }
         }
-        // 配列に合わせた既定が、保存した割り当てと重なるときは、既定の側を割り当てなしにする。
+        // 保存した割り当てと重なる既定を持つコマンド（保存した割り当てが無いもの）は、割り当てなしにして知らせる。
         var displaced: [Command] = []
-        for command in Command.allCases where overrides[command] == nil && layoutDerived.contains(command) {
+        for command in Command.allCases where overrides[command] == nil {
             if (defaultChords[command] ?? []).contains(where: { taken.contains($0) }) {
                 accepted[command] = []
                 displaced.append(command)
@@ -68,7 +63,7 @@ struct KeyBindingsStore {
         var notes: [String] = []
         if ignored { notes.append("一部のショートカット設定が無効だったため無視しました。") }
         if !displaced.isEmpty {
-            notes.append("キーボードの配列に合わせた既定が、保存した割り当てと重なったため、「\(displaced.map(\.title).joined(separator: "」「"))」を割り当てなしにしました。")
+            notes.append("既定のキーが、保存した割り当てと重なったため、「\(displaced.map(\.title).joined(separator: "」「"))」を割り当てなしにしました。")
         }
         return Loaded(
             bindings: KeyBindings(overrides: accepted, defaultChords: defaultChords),

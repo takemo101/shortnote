@@ -12,6 +12,7 @@ final class Toolbar: NSObject {
     var onTransparent: ((Bool) -> Void)?
     var onPickImages: (() -> Void)?
     var onCopyPath: (() -> Void)?
+    var onClear: (() -> Void)?
     var fileProvider: (() -> URL?)? {
         get { handle.fileProvider }
         set { handle.fileProvider = newValue }
@@ -28,7 +29,7 @@ final class Toolbar: NSObject {
     private(set) lazy var bottomRow: NSStackView = {
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let row = NSStackView(views: [handle, spacer, copyButton])
+        let row = NSStackView(views: [handle, spacer, clearButton, copyButton])
         row.orientation = .horizontal
         row.alignment = .centerY
         return row
@@ -37,6 +38,16 @@ final class Toolbar: NSObject {
     private let handle = DragHandleView()
     private let copyButton = NSButton(title: Toolbar.copyTitle, target: nil, action: nil)
     private static let copyTitle = "パスをコピー"
+
+    /// 描いたものを消す。背景画像は残る。取り消しで戻せるので、確認は出さない。
+    private let clearButton: NSButton = {
+        let button = NSButton(title: "クリア", target: nil, action: nil)
+        button.image = NSImage(systemSymbolName: "trash", accessibilityDescription: nil)
+        button.imagePosition = .imageLeading
+        button.bezelStyle = .rounded
+        button.refusesFirstResponder = true
+        return button
+    }()
 
     private lazy var tools: NSSegmentedControl = {
         let symbols = ["pencil.tip", "circle", "square", "textformat", "arrow.up.and.down.and.arrow.left.and.right"]
@@ -89,6 +100,8 @@ final class Toolbar: NSObject {
         copyButton.action = #selector(copyPath)
         copyButton.bezelStyle = .rounded
         copyButton.refusesFirstResponder = true
+        clearButton.target = self
+        clearButton.action = #selector(clearCanvas)
     }
 
     /// 表示を、いまの状態に合わせる（キーボードで切り替えたときにも使う）。
@@ -109,6 +122,7 @@ final class Toolbar: NSObject {
         for (i, entry) in toolCommands.enumerated() { tools.setToolTip(hint(entry.0, entry.1), forSegment: i) }
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)
+        clearButton.toolTip = hint("描いたものをすべて消す（背景画像は残る。取り消しで戻せる）", .clearCanvas)
         let smaller = center.chords(for: .brushSmaller).first?.displayString
         let larger = center.chords(for: .brushLarger).first?.displayString
         slider.toolTip = (smaller != nil && larger != nil) ? "ブラシサイズ（\(smaller!) 小さく / \(larger!) 大きく）" : "ブラシサイズ"
@@ -128,4 +142,5 @@ final class Toolbar: NSObject {
     @objc private func transparentChanged(_ sender: NSButton) { onTransparent?(sender.state == .on) }
     @objc private func pickImages() { onPickImages?() }
     @objc private func copyPath() { onCopyPath?() }
+    @objc private func clearCanvas() { onClear?() }
 }
