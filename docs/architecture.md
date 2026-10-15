@@ -12,7 +12,7 @@ ShortNote の Module の責務・状態の所有・座標と倍率・失敗の�
 | `ShortNoteKit`（ライブラリ） | `Sources/ShortNoteKit/` | アプリ本体。単体テストから `@testable import` で使う |
 | `ShortNoteKitTests` | `Tests/ShortNoteKitTests/` | Swift Testing の単体テスト（`scripts/test.sh`） |
 
-`ShortNoteKit` は、変わる理由ごとに 6 つのディレクトリへ分ける。**依存は上から下へだけ**向く（Core と Shortcuts は AppKit を `import` しない）。
+`ShortNoteKit` は、変わる理由ごとに 7 つのディレクトリへ分ける。**依存は上から下へだけ**向く（Core と Shortcuts は AppKit を `import` しない）。
 
 ```mermaid
 flowchart TD
@@ -26,6 +26,10 @@ flowchart TD
     App[App: 起動・多重起動・結びつけ] --> UI
     App --> Platform
     App --> Shortcuts
+    App --> Agent[Agent: CLI・操作の JSON]
+    Agent --> Render
+    Agent --> Platform
+    Agent --> Core
 ```
 
 | ディレクトリ | ファイル | 責務 | 持つ状態 |
@@ -35,12 +39,17 @@ flowchart TD
 | | `History<State>` | 取り消し・やり直し。積む・戻す・やり直す、200 段の上限、新しい操作でやり直しを捨てる規則 | 2 つのスタック |
 | | `CanvasSize`、`CanvasSizeStore` | キャンバスのサイズ（書き出しのピクセル数）。`parse` が検証して `Result` を返す。存在する値は常に有効。保存（`UserDefaults`） | なし |
 | | `TextSize` | 文字サイズの、選べる大きさ（12〜96 pt）と既定（18 pt）。ブラシサイズとは別 | なし |
-| | `CGPoint.clamped(to:)` | 点を範囲（縁を含む）に収める。`CanvasView` が、ポインタの位置をキャンバスの範囲に丸めるのに使う（キャンバスの外へ描かない・動かさない） | なし |
+| | `CGPoint.clamped(to:)` | 点を範囲（縁を含む）に収める。`CanvasView` が、ポインタの位置をキャンバスの範囲に丸めるのに使う（キャンバスの外へ描かない・動かさない）。`OpsApply` が、操作の座標を縁に丸めるのにも使う | なし |
+| | `Placement` | 画像を置く枠（キャンバスに収まるよう縮小して中央。拡大しない）。キャンバスで画像を開くときと、`render` の背景で、同じ規則を使う | なし |
 | `Shortcuts/` | `Command` | キーで呼べる操作の一覧（タイトル・グループ・全域か） | なし |
 | | `KeyChord` | 物理キーコード＋修飾キー。同一性はキーコードと修飾キーだけ（ラベルは表示用）。文字入力中に使えるか、全域にできるかの判定 | なし |
 | | `KeyBindings` | コマンドとキーの対応。**既定との差分だけ**を持つ。割り当て・解除・初期値は `Result`／新しい値で返す。重なり・予約済み・全域の修飾キーを検証 | 差分（値型） |
 | | `KeyBindingsStore` | 差分の保存（`UserDefaults` の `keyBindings`）。読み込み時に、無効・重なる項目を落として理由を返す | なし |
 | | `KeyRouter` | 押されたキーを、実行・文字入力欄へ転送・入力の取り消し・素通しのどれにするか決める純粋な関数。文字入力中の素の Esc は、割り当てに依らず取り消し | なし |
+| `Agent/` | `AgentError`、`AgentJSON` | CLI の失敗（`code`・終了コード 1〜4）と、標準出力・標準エラーの 1 行の JSON（SPEC §3.7） | なし |
+| | `Op`、`OpsParser` | 操作 1 つの値と、操作の JSON の検証（境界で一度だけ型にする。知らない項目・範囲外の値・上限超えは、何番目の操作かを付けて断る。1 つでも不正なら全体を断る） | なし |
+| | `OpsApply` | 検証済みの操作を `Item` にする。範囲外の座標は縁に丸め（`clamped`）、大きさがなくなった図形は足さずに `skipped` で返す。画像の読み込みは差し替えられる（テスト用） | なし |
+| | `RenderCommand`、`AgentCLI` | `render` の引数の解釈と実行（アプリを起動せず、`Document` を作って `CanvasRenderer` で PNG にする）。サブコマンドの振り分け（`runShortNote` が最初の引数で判断する） | なし |
 | `Render/` | `CanvasRenderer` | 画面と書き出しで共通の描画（`drawContent`）、市松模様の下地、PNG の生成 | なし |
 | `Platform/` | `ImageIntake` | 画像を `ImportedImage` にする入口（ペーストボード・ドロップ・ファイル選択・CLI）。`Result` で返す。ビットマップは画素をそのまま、PDF などは書き出し倍率の画素に描く。CLI・`open` で明示された 1 つのファイルだけは、種類で絞らず読む | なし |
 | | `ExportStore` | 書き出し先 `/tmp/shortnote/`、直前のファイルの再利用、`ExportError`（生成失敗・書込み失敗） | `cachedURL` |

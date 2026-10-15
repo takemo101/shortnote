@@ -37,6 +37,22 @@
 
   `open -a ShortNote --args /path/to/image.png` は、**起動していないときにだけ**効きます。ターミナルから実行ファイルを直接実行する場合（`ShortNote /path/to/image.png`）は、起動済みでも渡されます。
 
+## エージェントから使う（CLI）
+
+コーディングエージェントが、シェルから、画像に図形・文字を書き込めます（アプリを起動せずに、PNG を作ります）。操作は JSON で渡します（仕様は [SPEC.md §3.7](SPEC.md)）。
+
+```sh
+# 背景の画像に、楕円と文字を重ねて、PNG にする（座標はキャンバスのポイント。左上が原点）
+echo '{"version":1,"ops":[
+  {"op":"ellipse","x":12,"y":188,"w":104,"h":46,"color":"#ff0000"},
+  {"op":"text","x":212,"y":240,"text":"ここを直す","color":"#ff0000"}
+]}' | /Applications/ShortNote.app/Contents/MacOS/ShortNote render screenshot.png - -o out.png
+```
+
+操作は `pen`・`line`・`ellipse`・`rect`・`text`・`image`。範囲外の座標は、キャンバスの縁に丸められます。成功すると、標準出力に 1 行の JSON（出力のパス、ピクセル数、丸めた・足さなかった操作の番号）が出ます。失敗は、標準エラーの JSON と、終了コード（1 操作の JSON が不正、2 引数の誤り、4 ファイルの入出力）です。
+
+常駐中のアプリのキャンバスに、直接書き込む（`draw`・`get`・`export`・`clear`）は、まだ実装していません。
+
 ## ダウンロード
 
 リリースは、タグ `vX.Y.Z` のときに GitHub Actions が作ります。公開されたリリースは [Releases](https://github.com/takemo101/shortnote/releases) に並び、`ShortNote-X.Y.Z.dmg` をダウンロードできます（macOS 13 以降、Apple Silicon と Intel の両対応）。DMG を開いて、ShortNote を「Applications」へドラッグしてください。

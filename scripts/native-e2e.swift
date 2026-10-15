@@ -996,6 +996,56 @@ if let why = keyGuard(pid, app) {
     canvasWidthPt = 480
 } else { for id in lineIds { rec(id, "blocked", "canvas frame unavailable") } }
 
+// ---- CLI の render（A20・A21）：実際の実行ファイルで、アプリを起動せずに PNG を書く。常駐中のアプリ（この実行の候補）が動いていても、転送されずに動く ----
+/// 実行ファイルを、引数と標準入力つきで実行して、(終了コード, 標準出力, 標準エラー) を返す。
+func runCLI(_ args: [String], stdin: String? = nil) -> (Int32, String, String) {
+    let p = Process(); p.executableURL = URL(fileURLWithPath: buildExe); p.arguments = args
+    let out = Pipe(), err = Pipe(), inp = Pipe()
+    p.standardOutput = out; p.standardError = err; p.standardInput = inp
+    guard (try? p.run()) != nil else { return (-1, "", "could not run") }
+    if let stdin { inp.fileHandleForWriting.write(Data(stdin.utf8)) }
+    try? inp.fileHandleForWriting.close()
+    let o = out.fileHandleForReading.readDataToEndOfFile(), e = err.fileHandleForReading.readDataToEndOfFile()
+    p.waitUntilExit()
+    return (p.terminationStatus, String(data: o, encoding: .utf8) ?? "", String(data: e, encoding: .utf8) ?? "")
+}
+let renderIds = ["R1 render, run while the app is running, writes the 960x640 PNG itself (it is not forwarded to the app)", "R2 the rendered PNG has the operations at the given places and colours", "R3 invalid ops exit 1 with the op index and write nothing; a bad --size exits 2", "R4 ops can be read from stdin, and a coordinate outside the canvas is clamped, not an error"]
+do {
+    let rdir = "\(work)/render"
+    try? FileManager.default.createDirectory(atPath: rdir, withIntermediateDirectories: true)
+    let opsFile = "\(rdir)/ops.json", outFile = "\(rdir)/out.png", badOut = "\(rdir)/bad.png", stdinOut = "\(rdir)/stdin.png"
+    try? """
+    {"version":1,"ops":[{"op":"rect","x":100,"y":100,"w":120,"h":60,"color":"#ff0000","size":6},{"op":"line","from":[300,50],"to":[420,150],"color":"#0000ff","size":5},{"op":"text","x":40,"y":240,"text":"ABC","color":"#000000","fontSize":32}]}
+    """.write(toFile: opsFile, atomically: true, encoding: .utf8)
+    let appsBefore = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).count
+    let r1 = runCLI(["render", "-", opsFile, "-o", outFile])
+    let json1 = (try? JSONSerialization.jsonObject(with: Data(r1.1.utf8))) as? [String: Any]
+    let appsAfter = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).count
+    let wrote = FileManager.default.fileExists(atPath: outFile)
+    rec(renderIds[0], (r1.0 == 0 && wrote && json1?["width"] as? Int == 960 && json1?["height"] as? Int == 640 && appsBefore >= 1 && appsBefore == appsAfter) ? "pass" : "fail",
+        "exit=\(r1.0) stdout=\(r1.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(r1.2)' file written by this process=\(wrote) (a forwarded launch would exit 0 without a JSON line or a PNG); running instances with this bundle ID before/after=\(appsBefore)/\(appsAfter) (the app was running: need >= 1; unchanged)")
+    if wrote, let rep = load(outFile) {
+        canvasWidthPt = 480
+        let rectEdge = at(rep, 100, 130), rectInside = at(rep, 160, 130), lineMid = at(rep, 360, 100), corner = at(rep, 460, 300)
+        let textDark = countDark(rep, 40, 240, 100, 280)
+        let isRed = rectEdge.r > 0.8 && rectEdge.g < 0.4 && rectEdge.b < 0.4
+        let isBlue = lineMid.b > 0.8 && lineMid.r < 0.4 && lineMid.g < 0.4
+        let white = { (p: Px) in p.r > 0.95 && p.g > 0.95 && p.b > 0.95 }
+        rec(renderIds[1], (isRed && isBlue && white(rectInside) && white(corner) && textDark > 100) ? "pass" : "fail",
+            "rect edge red=\(isRed) line midpoint blue=\(isBlue) rect interior white=\(white(rectInside)) far corner white=\(white(corner)) dark px of the text 'ABC'=\(textDark) (need>100)")
+    } else { rec(renderIds[1], "blocked", "the PNG was not written, or could not be read") }
+    let r3a = runCLI(["render", "-", "-", "-o", badOut], stdin: #"{"version":1,"ops":[{"op":"line","from":[10,10],"to":[90,10]},{"op":"nope"}]}"#)
+    let errJson = (try? JSONSerialization.jsonObject(with: Data(r3a.2.utf8))) as? [String: Any]
+    let errBody = errJson?["error"] as? [String: Any]
+    let r3b = runCLI(["render", "--size", "100x100", "-", opsFile, "-o", badOut])
+    rec(renderIds[2], (r3a.0 == 1 && errBody?["code"] as? String == "invalid_ops" && errBody?["op"] as? Int == 1 && r3b.0 == 2 && !FileManager.default.fileExists(atPath: badOut)) ? "pass" : "fail",
+        "bad op: exit=\(r3a.0) stderr=\(r3a.2.trimmingCharacters(in: .whitespacesAndNewlines)); --size 100x100: exit=\(r3b.0); output file created=\(FileManager.default.fileExists(atPath: badOut))")
+    let r4 = runCLI(["render", "-", "-", "-o", stdinOut], stdin: #"{"version":1,"ops":[{"op":"line","from":[10,10],"to":[5000,10]}]}"#)
+    let json4 = (try? JSONSerialization.jsonObject(with: Data(r4.1.utf8))) as? [String: Any]
+    rec(renderIds[3], (r4.0 == 0 && json4?["clamped"] as? [Int] == [0] && FileManager.default.fileExists(atPath: stdinOut)) ? "pass" : "fail",
+        "exit=\(r4.0) stdout=\(r4.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(r4.2)'")
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -191,9 +191,7 @@ final class CanvasView: NSView {
 
     /// 背景画像の枠。現在のキャンバスに収まるよう、縦横比を保って中央に置く（拡大はしない）。
     private func fitted(_ size: CGSize) -> CGRect {
-        let scale = min(bounds.width / size.width, bounds.height / size.height, 1)
-        let w = size.width * scale, h = size.height * scale
-        return CGRect(x: (bounds.width - w) / 2, y: (bounds.height - h) / 2, width: w, height: h)
+        Placement.fitted(size, in: bounds.size)
     }
 
     // MARK: - ポインタ
