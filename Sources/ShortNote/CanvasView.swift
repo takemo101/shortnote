@@ -24,6 +24,8 @@ struct Item {
     var image: NSImage?
 
     var bounds: CGRect {
+        // 図形は線の太さの分だけ外側まで当たりにする（太い線の外側の半分も掴めるように）。
+        if kind == .ellipse || kind == .rect { return rect.insetBy(dx: -size / 2, dy: -size / 2) }
         guard kind == .pen else { return rect }
         guard let first = points.first else { return .zero }
         var minX = first.point.x, maxX = minX, minY = first.point.y, maxY = minY
@@ -56,6 +58,8 @@ final class CanvasView: NSView {
     static let minimumSize = NSSize(width: 480, height: 320)
     /// 書き出す PNG の長辺の上限（ピクセル）。最大化した大きなキャンバスで巨大になりすぎないように。
     static let maxExportSide: CGFloat = 8192
+    /// 取り消せる段数の上限。
+    static let maxUndoSteps = 200
 
     var tool: Tool = .pen {
         didSet {
@@ -137,6 +141,7 @@ final class CanvasView: NSView {
 
     func undo() {
         commitEditing()
+        cancelPointerInteraction()
         guard let previous = undoStack.popLast() else { return }
         redoStack.append(doc)
         doc = previous
@@ -145,17 +150,32 @@ final class CanvasView: NSView {
 
     func redo() {
         commitEditing()
+        cancelPointerInteraction()
         guard let next = redoStack.popLast() else { return }
-        undoStack.append(doc)
+        pushUndo(doc)
         doc = next
         changed()
     }
 
     private func commit(_ new: Doc) {
-        undoStack.append(doc)
+        cancelPointerInteraction()
+        pushUndo(doc)
         redoStack.removeAll()
         doc = new
         changed()
+    }
+
+    /// 履歴に積む。上限を超えたら、いちばん古いものから捨てる（長い作業でメモリが増え続けないように）。
+    private func pushUndo(_ d: Doc) {
+        undoStack.append(d)
+        if undoStack.count > Self.maxUndoSteps { undoStack.removeFirst(undoStack.count - Self.maxUndoSteps) }
+    }
+
+    /// ポインタ操作の途中（描いている線・移動中の要素）を捨てる。ボタンを押したまま取り消し・貼り付けをされても、古い状態を書き戻さないように。
+    private func cancelPointerInteraction() {
+        draft = nil
+        moveIndex = nil
+        moveBase = nil
     }
 
     private func changed() {
@@ -174,8 +194,10 @@ final class CanvasView: NSView {
 
     // MARK: - Images (paste / drop / file picker)
 
+    /// 内容の型（`contentType`）を先に見て、無ければ拡張子で判断する（拡張子の無い・違うファイルも読めるように）。
     private static func isImageFile(_ url: URL) -> Bool {
-        UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
+        if let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType { return type.conforms(to: .image) }
+        return UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
     }
 
     /// 画像ファイルだけを読む（読めないもの・画像でないものは捨てる）。
@@ -274,6 +296,7 @@ final class CanvasView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let p = location(event)
         if let i = moveIndex, let base = moveBase {
+            guard i < doc.items.count else { return }   // 履歴の操作などで要素が減っていたら、動かさない
             doc.items[i] = base.items[i].translated(by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y))
             needsDisplay = true
             return
@@ -298,7 +321,7 @@ final class CanvasView: NSView {
             moveBase = nil
             window?.invalidateCursorRects(for: self)
             if location(event) != dragStart {
-                undoStack.append(base)
+                pushUndo(base)
                 redoStack.removeAll()
                 changed()
             }

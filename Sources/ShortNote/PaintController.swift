@@ -18,6 +18,11 @@ final class PaintPanel: NSPanel {
         if event.type == .keyDown {
             let editing = isEditingText()
             if event.keyCode == 53 {  // Esc
+                // 日本語入力の変換中は、Esc を入力システムに渡す（変換だけを取り消し、入力中の文字は消さない）。
+                if editing, (firstResponder as? NSTextView)?.hasMarkedText() == true {
+                    super.sendEvent(event)
+                    return
+                }
                 if editing { onCancelEdit?() } else { orderOut(nil) }
                 return
             }
@@ -76,7 +81,16 @@ final class PaintController: NSObject {
         )
         super.init()
         buildUI()
-        applyCanvasPx(Self.savedCanvasPx())  // 画像つきで起動したときも、画像の配置がこの大きさのキャンバスで決まるように、ここで適用する
+        // 保存したサイズが、いまの画面に収まらないとき（外付けディスプレイを外したなど）は、収まる最大まで縮めて起動する。保存した値は変えない。
+        // 画像つきで起動したときも、画像の配置がこの大きさのキャンバスで決まるように、ここで適用する。
+        let saved = Self.savedCanvasPx()
+        if !applyCanvasPx(saved) {
+            let maxPx = maxCanvasPx()
+            applyCanvasPx(CGSize(
+                width: max(Self.minimumCanvasPx.width, floor(min(saved.width, maxPx.width) / 2) * 2),
+                height: max(Self.minimumCanvasPx.height, floor(min(saved.height, maxPx.height) / 2) * 2)
+            ))
+        }
     }
 
     // MARK: - UI
@@ -275,9 +289,11 @@ final class PaintController: NSObject {
         panel.contentView?.layoutSubtreeIfNeeded()
         let frame = targetScreenFrame
         let chromeW = panel.frame.width - canvas.bounds.width, chromeH = panel.frame.height - canvas.bounds.height
+        // 偶数に切り下げ、書き出しの長辺の上限（8192）を超えないようにする（上限を超えると、書き出しの倍率が下がり、ピクセル数が一致しなくなる）。
+        func even(_ v: CGFloat) -> CGFloat { floor(min(v, CanvasView.maxExportSide) / 2) * 2 }
         return CGSize(
-            width: floor((frame.width - chromeW) * CanvasView.exportScale),
-            height: floor((frame.height - chromeH) * CanvasView.exportScale)
+            width: even((frame.width - chromeW) * CanvasView.exportScale),
+            height: even((frame.height - chromeH) * CanvasView.exportScale)
         )
     }
 
@@ -287,7 +303,8 @@ final class PaintController: NSObject {
     private func applyCanvasPx(_ px: CGSize) -> Bool {
         let maxPx = maxCanvasPx()
         guard px.width >= Self.minimumCanvasPx.width, px.height >= Self.minimumCanvasPx.height,
-              px.width <= maxPx.width, px.height <= maxPx.height else { return false }
+              px.width <= maxPx.width, px.height <= maxPx.height,
+              px.width.truncatingRemainder(dividingBy: 2) == 0, px.height.truncatingRemainder(dividingBy: 2) == 0 else { return false }   // 奇数はウィンドウの 1x 表示で 1 ピクセルずれるため受け付けない
         let target = CGSize(width: px.width / CanvasView.exportScale, height: px.height / CanvasView.exportScale)
         let cur = canvas.bounds.size
         let old = panel.frame
@@ -306,13 +323,12 @@ final class PaintController: NSObject {
     func setCanvasSize(px: CGSize) -> Bool {
         if applyCanvasPx(px) {
             Self.saveCanvasPx(px)
-            cachedURL = nil
             return true
         }
         let maxPx = maxCanvasPx()
         let alert = NSAlert()
         alert.messageText = "このサイズにはできません"
-        alert.informativeText = "キャンバスは 最小 \(Int(Self.minimumCanvasPx.width)) × \(Int(Self.minimumCanvasPx.height)) から、この画面では 最大 \(Int(maxPx.width)) × \(Int(maxPx.height)) ピクセルまでです。"
+        alert.informativeText = "キャンバスは 最小 \(Int(Self.minimumCanvasPx.width)) × \(Int(Self.minimumCanvasPx.height)) から、この画面では 最大 \(Int(maxPx.width)) × \(Int(maxPx.height)) ピクセルまでです。幅と高さは偶数にしてください（画面では 2 ピクセルが 1 ポイントのため）。"
         NSApp.activate(ignoringOtherApps: true)
         alert.runModal()
         return false
@@ -359,7 +375,7 @@ final class PaintController: NSObject {
         }
         NSApp.activate(ignoringOtherApps: true)
         panel.makeKeyAndOrderFront(nil)
-        panel.makeFirstResponder(canvas)
+        if !canvas.isEditing { panel.makeFirstResponder(canvas) }   // 文字入力中なら、フォーカスを入力欄から奪わない
     }
 
     @discardableResult
