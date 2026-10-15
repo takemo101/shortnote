@@ -233,7 +233,7 @@ final class CanvasView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let p = location(event)
         if let move {
-            guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y)) else { return }
+            guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
             document = moved
             needsDisplay = true
             return

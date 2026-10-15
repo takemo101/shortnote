@@ -24,12 +24,35 @@ struct Document {
         return copy
     }
 
+    /// 移動ツールが要素を掴める範囲の、外接する範囲の外側への余白（pt）。
+    static let grabSlop: CGFloat = 4
+    /// 動かした要素の掴める範囲が、キャンバスの中に残る長さの下限（pt）。
+    static let keptInCanvas: CGFloat = 16
+
     /// `index` の要素を、平行移動したものにして返す。範囲外なら `nil`。
-    func translatingItem(at index: Int, by d: CGSize) -> Document? {
+    /// 動かす量は、要素の掴める範囲がキャンバスの中に残る長さを、軸ごとに下回らないよう制限する（`limited(_:for:in:keep:)`）。
+    func translatingItem(at index: Int, by d: CGSize, keepingGrabAreaIn canvas: CGRect) -> Document? {
         guard items.indices.contains(index) else { return nil }
         var copy = self
-        copy.items[index] = items[index].translated(by: d)
+        let area = items[index].bounds.insetBy(dx: -Self.grabSlop, dy: -Self.grabSlop)
+        copy.items[index] = items[index].translated(by: Self.limited(d, for: area, in: canvas, keep: Self.keptInCanvas))
         return copy
+    }
+
+    /// `d` だけ動かしたとき、`area`（掴める範囲）が `canvas` の中に残る長さが、軸ごとに、
+    /// `min(keep, area の大きさ, いまキャンバスの中にある分)` を下回らないように、`d` を制限したもの。
+    /// いまの位置（`d` が 0）は、必ず許される。
+    static func limited(_ d: CGSize, for area: CGRect, in canvas: CGRect, keep: CGFloat) -> CGSize {
+        func limit(_ delta: CGFloat, _ a0: CGFloat, _ length: CGFloat, _ c0: CGFloat, _ c1: CGFloat) -> CGFloat {
+            let a1 = a0 + length
+            let inside = max(0, min(a1, c1) - max(a0, c0))
+            let k = min(keep, length, inside)
+            return min(max(delta, c0 + k - a1), c1 - k - a0)
+        }
+        return CGSize(
+            width: limit(d.width, area.minX, area.width, canvas.minX, canvas.maxX),
+            height: limit(d.height, area.minY, area.height, canvas.minY, canvas.maxY)
+        )
     }
 
     /// 描いたもの（要素）をすべて消した文書を返す。背景画像は残す。消すものが無いときは `nil`（履歴に積む変更が無い）。
@@ -42,7 +65,7 @@ struct Document {
 
     /// `point` を囲む範囲を持つ、いちばん手前の要素の番号。無ければ `nil`。
     /// 円・四角・ペンの輪も、内側をクリックして掴める（囲む範囲で判定する）。
-    func topItemIndex(at point: CGPoint, slop: CGFloat = 4) -> Int? {
+    func topItemIndex(at point: CGPoint, slop: CGFloat = Document.grabSlop) -> Int? {
         items.lastIndex { $0.bounds.insetBy(dx: -slop, dy: -slop).contains(point) }
     }
 }

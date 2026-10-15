@@ -872,7 +872,7 @@ if let why = keyGuard(pid, app) {
 
 // ---- キャンバスの縁（A18）：キャンバスの外へ出す操作で、要素が掴めなくなったり、外へはみ出したりしない ----
 // ポインタは、自分のウィンドウの中（キャンバスの右の余白と、上のツールバーの帯）までしか出さない。
-let edgeIds = ["B1 moving an item past the canvas edge keeps part of it in the canvas", "B2 an item moved past the edge can be grabbed and moved back", "B3 a shape dragged past the right edge ends at the edge"]
+let edgeIds = ["B1 moving an item past the canvas edge keeps part of it in the canvas", "B2 an item moved past the edge can be grabbed and moved back", "B3 a shape dragged past the right edge ends at the edge", "B4 an item grabbed by an empty corner of its box and dragged far out can still be grabbed and moved back"]
 if let why = keyGuard(pid, app) {
     for id in edgeIds { rec(id, "blocked", "keyboard guard: \(why)") }
 } else if let cf = canvasFrame() {
@@ -903,6 +903,21 @@ if let why = keyGuard(pid, app) {
         rec(edgeIds[1], "blocked", "depends on B1")
     }
     key(40, .maskCommand)
+
+    // B4：楕円の外接する範囲の、何も描かれていない左上の角（外側）を掴んで、右下の外（余白・下の帯）まで動かす。
+    // 掴んだ点だけをキャンバスの中に残しても、楕円の輪は、角から遠いので、完全に外へ出てしまう。掴める範囲が残っていれば、また掴んで戻せる。
+    let H = Double(cf.height)
+    if selectTool(1), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
+       selectTool(4), drag(line(pt(103, 103), pt(W + 8, H + 20)), pid: pid) {
+        // 掴める範囲（外接する範囲＋4 pt）の、16 pt が、右下の角に残る。そこ（W-10, H-10）を掴んで、左上へ戻す。
+        let back = (dx: -300.0, dy: -200.0)
+        let moved = drag(line(pt(W - 10, H - 10), pt(W - 10 + back.dx, H - 10 + back.dy)), pid: pid)
+        let shift = (x: (W - 110) + back.dx, y: (H - 110) + back.dy)   // 1 回目：掴める範囲が、右下に 16 pt 残る位置まで。2 回目：戻した量
+        if moved, let r = exportImg() {
+            let ring = darkest(r, 100 + shift.x, 150 + shift.y)   // 楕円の左端（元は (100, 150)）
+            rec(edgeIds[3], isDark(ring) ? "pass" : "fail", "after dragging from the empty top-left corner (103,103) out past the bottom-right and back from (\(Int(W) - 10), \(Int(H) - 10)): dark pixel on the ellipse's left end at (\(Int(100 + shift.x)), \(Int(150 + shift.y))): lum=\(String(format: "%.2f", ring.lum))")
+        } else { rec(edgeIds[3], "blocked", "drag guard / export failed on the recovery drag") }
+    } else { rec(edgeIds[3], "blocked", "the ellipse was not drawn, or the tool select / drag guard failed") }
     canvasWidthPt = 480
 } else { for id in edgeIds { rec(id, "blocked", "canvas frame unavailable") } }
 
