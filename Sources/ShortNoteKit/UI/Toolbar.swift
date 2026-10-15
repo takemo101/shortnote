@@ -22,7 +22,7 @@ final class Toolbar: NSObject {
     private(set) lazy var topRow: NSStackView = {
         let row = NSStackView(views: [tools, pickButton, colorWell, slider, textSizePopup, transparentCheckbox])
         row.orientation = .horizontal
-        row.spacing = 12
+        row.spacing = 8
         row.alignment = .centerY
         return row
     }()
@@ -51,7 +51,7 @@ final class Toolbar: NSObject {
     }()
 
     private lazy var tools: NSSegmentedControl = {
-        let symbols = ["pencil.tip", "circle", "square", "textformat", "arrow.up.and.down.and.arrow.left.and.right"]
+        let symbols = ["pencil.tip", "circle", "square", "textformat", "arrow.up.and.down.and.arrow.left.and.right", "line.diagonal"]
         let control = NSSegmentedControl(
             images: symbols.map { NSImage(systemSymbolName: $0, accessibilityDescription: nil) ?? NSImage() },
             trackingMode: .selectOne, target: self, action: #selector(toolChanged(_:))
@@ -74,7 +74,7 @@ final class Toolbar: NSObject {
     private lazy var slider: NSSlider = {
         let slider = NSSlider(value: 4, minValue: Double(Self.brushRange.lowerBound), maxValue: Double(Self.brushRange.upperBound), target: self, action: #selector(sizeChanged(_:)))
         slider.refusesFirstResponder = true
-        slider.widthAnchor.constraint(equalToConstant: 80).isActive = true
+        slider.widthAnchor.constraint(equalToConstant: 64).isActive = true
         return slider
     }()
 
@@ -138,7 +138,7 @@ final class Toolbar: NSObject {
             let keys = center.chords(for: command).map(\.displayString).joined(separator: " / ")
             return keys.isEmpty ? title : "\(title)（\(keys)）"
         }
-        let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove)]
+        let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove), ("直線", .toolLine)]
         for (i, entry) in toolCommands.enumerated() { tools.setToolTip(hint(entry.0, entry.1), forSegment: i) }
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)

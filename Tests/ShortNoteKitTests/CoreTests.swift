@@ -88,6 +88,7 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
             Item(content: .ellipse(CGRect(x: 5, y: 5, width: 20, height: 10)), color: black, size: 4),
             Item(content: .text("hi", box: CGRect(x: 5, y: 5, width: 20, height: 10)), color: black, size: 18),
             Item(content: .image(tiny, box: CGRect(x: 5, y: 5, width: 20, height: 10)), color: black, size: 0),
+            Item(content: .line(from: CGPoint(x: 5, y: 5), to: CGPoint(x: 25, y: 15)), color: black, size: 4),
         ]
         for original in items {
             let before = original.bounds
@@ -107,11 +108,12 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
             .appending(Item(content: .ellipse(box), color: black, size: 4))
             .appending(Item(content: .text("hi", box: box), color: black, size: 18))
             .appending(Item(content: .image(tinyImage(), box: box), color: black, size: 0))
+            .appending(Item(content: .line(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 8, y: 6)), color: black, size: 4))
         let cleared = doc.clearingItems()
         #expect(cleared?.items.isEmpty == true)
         #expect(cleared?.background != nil)
         #expect(cleared?.backgroundRect == rect)
-        #expect(doc.items.count == 5)   // 元の値は変わらない（取り消しで戻せる）
+        #expect(doc.items.count == 6)   // 元の値は変わらない（取り消しで戻せる）
     }
 
     @Test func clearingItems_hasNothingToDoOnAnEmptyCanvas() {

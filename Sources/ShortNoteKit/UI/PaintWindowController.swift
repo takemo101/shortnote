@@ -156,6 +156,7 @@ final class PaintWindowController: NSObject {
         case .toolRect: select(.rect)
         case .toolText: select(.text)
         case .toolMove: select(.move)
+        case .toolLine: select(.line)
         case .brushSmaller: adjustBrush(by: -Self.brushStep)
         case .brushLarger: adjustBrush(by: Self.brushStep)
         }

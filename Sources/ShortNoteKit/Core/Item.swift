@@ -17,6 +17,7 @@ struct ImportedImage {
 struct Item {
     enum Content {
         case pen(points: [StrokePoint])
+        case line(from: CGPoint, to: CGPoint)
         case ellipse(CGRect)
         case rect(CGRect)
         case text(String, box: CGRect)
@@ -31,6 +32,8 @@ struct Item {
     /// 要素を囲む範囲（移動ツールが掴める範囲）。線の太さの分だけ外側まで含める。
     var bounds: CGRect {
         switch content {
+        case .line(let a, let b):
+            return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y)).insetBy(dx: -size / 2, dy: -size / 2)
         case .pen(let points):
             guard let first = points.first else { return .zero }
             var minX = first.point.x, maxX = minX, minY = first.point.y, maxY = minY
@@ -50,6 +53,8 @@ struct Item {
     func translated(by d: CGSize) -> Item {
         var item = self
         switch content {
+        case .line(let a, let b):
+            item.content = .line(from: CGPoint(x: a.x + d.width, y: a.y + d.height), to: CGPoint(x: b.x + d.width, y: b.y + d.height))
         case .pen(let points):
             item.content = .pen(points: points.map { StrokePoint(point: CGPoint(x: $0.point.x + d.width, y: $0.point.y + d.height), pressure: $0.pressure) })
         case .ellipse(let rect):

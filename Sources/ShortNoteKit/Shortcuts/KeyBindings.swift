@@ -43,6 +43,7 @@ struct KeyBindings: Equatable {
             .toolRect: [chord(20, "3")],
             .toolText: [chord(21, "4")],
             .toolMove: [chord(23, "5")],
+            .toolLine: [chord(22, "6")],
             .brushSmaller: [chord(bracketKeyCodes.smaller, "[")],
             .brushLarger: [chord(bracketKeyCodes.larger, "]")],
         ]

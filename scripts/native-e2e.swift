@@ -233,7 +233,7 @@ guard let copy = copyBtn else { rec("AX copy button", "fail", "not found\n" + du
 let boxes = collect(app) { axs($0, "AXRole") == "AXCheckBox" && axs($0, "AXTitle") == "背景透過" }
 let radios = collect(app) { axs($0, "AXRole") == "AXRadioButton" }.sorted { (ax($0, "AXPosition").flatMap { v in var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x } ?? 0) < (ax($1, "AXPosition").flatMap { v in var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x } ?? 0) }
 let sliders = collect(app) { axs($0, "AXRole") == "AXSlider" }
-rec("C4 AX controls reachable", (boxes.count == 1 && radios.count == 5 && sliders.count == 1) ? "pass" : "fail",
+rec("C4 AX controls reachable", (boxes.count == 1 && radios.count == 6 && sliders.count == 1) ? "pass" : "fail",
     "checkbox=\(boxes.count) toolRadios=\(radios.count) slider=\(sliders.count); tool labels=\(radios.map { "t='\(axs($0, "AXTitle"))' d='\(axs($0, "AXDescription"))' h='\(axs($0, "AXHelp"))'" })")
 
 func export() -> String? {
@@ -270,7 +270,7 @@ if drag(line(pt(280, 30), pt(440, 30)), pid: pid), let p = export(), let r = loa
 } else { rec("C6 pen stroke", "blocked", "pointer guard refused (hit target not candidate) or export failed") }
 
 // shapes
-func selectTool(_ i: Int) -> Bool { guard radios.count == 5, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
+func selectTool(_ i: Int) -> Bool { guard radios.count == 6, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
     return wait(2) { (ax(radios[i], "AXValue") as? NSNumber)?.intValue == 1 } }
 if selectTool(1), drag(line(pt(300, 60), pt(440, 140)), pid: pid), let p = export(), let r = load(p) {
     let edge = darkest(r, 300, 100), mid = at(r, 370, 100)
@@ -420,7 +420,7 @@ func waitCanvas(_ pred: (CGRect) -> Bool) -> CGRect? { var r: CGRect? = nil; _ =
 if let aw = axWindow(), let c0 = canvasFrame(), let w0 = axSize(aw) {
     setAXSize(aw, 300, 200); usleep(600_000)
     let cMin = canvasFrame() ?? c0
-    rec("Z1 window cannot shrink below the canvas minimum", (cMin.width >= 480 && cMin.height >= 320) ? "pass" : "fail", "after asking for 300x200: canvas \(Int(cMin.width))x\(Int(cMin.height)) (minimum 480x320)")
+    rec("Z1 window cannot shrink below the canvas minimum", (abs(cMin.width - 480) < 1 && abs(cMin.height - 320) < 1) ? "pass" : "fail", "after asking for 300x200: canvas \(Int(cMin.width))x\(Int(cMin.height)) (the minimum is exactly 480x320; a wider toolbar would push it up)")
 
     setAXSize(aw, w0.width + 240, w0.height + 160)
     if let c1 = waitCanvas({ $0.width > c0.width + 200 }) {
@@ -920,6 +920,53 @@ if let why = keyGuard(pid, app) {
     } else { rec(edgeIds[3], "blocked", "the ellipse was not drawn, or the tool select / drag guard failed") }
     canvasWidthPt = 480
 } else { for id in edgeIds { rec(id, "blocked", "canvas frame unavailable") } }
+
+// ---- 直線ツール（A19）：実キー 6 で選び、斜めの直線を引き、動かし、取り消す。大きさのない直線は足さない ----
+let lineIds = ["N1 key 6 selects the line tool (the 6th segment)", "N2 a diagonal line is drawn from the start to the end of the drag", "N3 a click without a drag adds no line (Cmd+Z removes the line before it, Cmd+Shift+Z brings it back)", "N4 the move tool carries the line; Cmd+Z puts it back"]
+if let why = keyGuard(pid, app) {
+    for id in lineIds { rec(id, "blocked", "keyboard guard: \(why)") }
+} else if let cf = canvasFrame() {
+    canvasWidthPt = Double(cf.width)
+    func darkAt(_ x: Double, _ y: Double) -> Bool? { exportImg().map { isDark(darkest($0, x, y)) } }
+    key(40, .maskCommand)   // 描いたものを消す
+    key(22, [])             // 6：直線
+    let selected = wait(2) { radioSelected() == 5 }
+    rec(lineIds[0], selected ? "pass" : "fail", "selected tool segment after pressing 6 = \(radioSelected().map(String.init) ?? "none") (expect 5)")
+
+    // 始点 (120,100)、終点 (300,200)。中点は (210,150)。線から離れた、範囲の隅 (300,100)・(120,200) には、何も無い。
+    if selected, drag(line(pt(120, 100), pt(300, 200)), pid: pid) {
+        let mid = darkAt(210, 150), cornerA = darkAt(300, 100), cornerB = darkAt(120, 200)
+        rec(lineIds[1], (mid == true && cornerA == false && cornerB == false) ? "pass" : "fail", "dark at the midpoint (210,150)=\(String(describing: mid)); at the empty corners (300,100)=\(String(describing: cornerA)), (120,200)=\(String(describing: cornerB))")
+
+        // 対照：ペンのクリックは、点を足す（クリックが届くこと、Cmd+Z で消えることの確認）。届いていなければ、以下の「足されない」は、何も見ていないことになる。
+        let penClick = selectTool(0) && click(pt(50, 250))
+        let dotThere = darkAt(50, 250)
+        key(6, .maskCommand)
+        let dotGone = darkAt(50, 250)
+        let control = penClick && dotThere == true && dotGone == false
+        // 大きさのないドラッグ（クリック）。線が足されていれば、Cmd+Z で消えるのは、クリックの分で、本物の線が残る。
+        let clicked = selectTool(5) && click(pt(50, 250))
+        let nothingDrawn = darkAt(50, 250)
+        key(6, .maskCommand)
+        let afterUndo = darkAt(210, 150)
+        key(6, [.maskCommand, .maskShift])
+        let afterRedo = darkAt(210, 150)
+        rec(lineIds[2], (control && clicked && nothingDrawn == false && afterUndo == false && afterRedo == true) ? "pass" : "fail", "control (pen click): dot there=\(String(describing: dotThere)), gone after Cmd+Z=\(String(describing: dotGone.map { !$0 })); line-tool click delivered=\(clicked), nothing drawn at the click=\(String(describing: nothingDrawn.map { !$0 })); after Cmd+Z the line is gone=\(String(describing: afterUndo.map { !$0 })); after Cmd+Shift+Z it is back=\(String(describing: afterRedo))")
+
+        // 移動：中点を 60 pt 下へ。線は (120,160)〜(300,260) になる。
+        if selectTool(4), drag(line(pt(210, 150), pt(210, 210)), pid: pid) {
+            let movedMid = darkAt(210, 210), oldMid = darkAt(210, 150)
+            key(6, .maskCommand)
+            let backMid = darkAt(210, 150), movedGone = darkAt(210, 210)
+            rec(lineIds[3], (movedMid == true && oldMid == false && backMid == true && movedGone == false) ? "pass" : "fail", "after moving down 60: dark at (210,210)=\(String(describing: movedMid)), at the old midpoint (210,150)=\(String(describing: oldMid)); after Cmd+Z: (210,150)=\(String(describing: backMid)), (210,210)=\(String(describing: movedGone))")
+        } else { rec(lineIds[3], "blocked", "tool select / drag guard failed") }
+    } else {
+        rec(lineIds[1], "blocked", "the line tool was not selected or the drag guard refused")
+        rec(lineIds[2], "blocked", "depends on N2"); rec(lineIds[3], "blocked", "depends on N2")
+    }
+    key(40, .maskCommand)
+    canvasWidthPt = 480
+} else { for id in lineIds { rec(id, "blocked", "canvas frame unavailable") } }
 
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path

@@ -10,7 +10,7 @@ enum Command: String, CaseIterable, Codable, Hashable {
     case showPanel, hidePanel
     case undo, redo, clearCanvas
     case pasteImage, openImage, copyPath
-    case toolPen, toolEllipse, toolRect, toolText, toolMove
+    case toolPen, toolEllipse, toolRect, toolText, toolMove, toolLine
     case brushSmaller, brushLarger
 
     var title: String {
@@ -28,6 +28,7 @@ enum Command: String, CaseIterable, Codable, Hashable {
         case .toolRect: return "ツール: 四角"
         case .toolText: return "ツール: 文字"
         case .toolMove: return "ツール: 移動"
+        case .toolLine: return "ツール: 直線"
         case .brushSmaller: return "ブラシを細く"
         case .brushLarger: return "ブラシを太く"
         }
@@ -41,7 +42,7 @@ enum Command: String, CaseIterable, Codable, Hashable {
         case .showPanel, .hidePanel: return .window
         case .undo, .redo, .clearCanvas: return .edit
         case .pasteImage, .openImage, .copyPath: return .image
-        case .toolPen, .toolEllipse, .toolRect, .toolText, .toolMove: return .tool
+        case .toolPen, .toolEllipse, .toolRect, .toolText, .toolMove, .toolLine: return .tool
         case .brushSmaller, .brushLarger: return .brush
         }
     }

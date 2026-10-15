@@ -111,6 +111,11 @@ enum CanvasRenderer {
         ctx.setLineJoin(.round)
 
         switch item.content {
+        case .line(let a, let b):
+            ctx.setLineWidth(item.size)
+            ctx.move(to: a)
+            ctx.addLine(to: b)
+            ctx.strokePath()
         case .pen(let points):
             drawStroke(points, size: item.size, in: ctx)
         case .rect(let rect):
