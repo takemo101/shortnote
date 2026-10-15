@@ -257,7 +257,7 @@ final class CanvasView: NSView {
         if let finished = move {
             move = nil
             window?.invalidateCursorRects(for: self)
-            if location(event) != dragStart {
+            if document.hasMovedItem(at: finished.index, since: finished.base) {   // 上限で止まって動かなかったドラッグは、取り消しの段にしない
                 history.record(previous: finished.base)
                 changed()
             }

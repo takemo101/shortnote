@@ -155,6 +155,16 @@ private func penItem(_ pts: [(CGFloat, CGFloat)], size: CGFloat = 4) -> Item {
         #expect(r.width == 370, "got \(r.width)")
     }
 
+    @Test func hasMovedItem_isFalseWhenTheLimitStoppedTheMoveEntirely() {
+        // 掴める範囲（外接する範囲＋余白 4 pt。線の太さ 4 で、矩形から 6 pt 外側）の左上が、ちょうど (464, 304)＝縁から 16 pt の位置にある楕円。これ以上、右下へは動かせない。
+        let base = Document().appending(Item(content: .ellipse(CGRect(x: 470, y: 310, width: 100, height: 100)), color: black, size: 4))
+        let stuck = base.translatingItem(at: 0, by: CGSize(width: 50, height: 50), keepingGrabAreaIn: canvas)
+        #expect(stuck?.hasMovedItem(at: 0, since: base) == false)
+        let back = base.translatingItem(at: 0, by: CGSize(width: -50, height: -50), keepingGrabAreaIn: canvas)   // 戻す向きは動く
+        #expect(back?.hasMovedItem(at: 0, since: base) == true)
+        #expect(base.hasMovedItem(at: 5, since: base) == false)   // 範囲外の番号
+    }
+
     @Test func limited_neverPullsAnItemThatIsAlreadyMostlyOutside() {
         // 右の縁から 3 pt だけ中にある（x 477〜）要素を、いま掴んだ。その 3 pt は、そのまま保てる（動かし始めで飛ばない）が、これ以上は外へ出せない。
         let area = CGRect(x: 477, y: 100, width: 100, height: 50)

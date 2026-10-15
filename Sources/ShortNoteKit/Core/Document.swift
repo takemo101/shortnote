@@ -55,6 +55,12 @@ struct Document {
         )
     }
 
+    /// `index` の要素が、`base`（動かす前の文書）から動いているか。動かせる範囲の上限で止まって、動かなかったときは `false`。
+    func hasMovedItem(at index: Int, since base: Document) -> Bool {
+        guard items.indices.contains(index), base.items.indices.contains(index) else { return false }
+        return items[index].bounds != base.items[index].bounds
+    }
+
     /// 描いたもの（要素）をすべて消した文書を返す。背景画像は残す。消すものが無いときは `nil`（履歴に積む変更が無い）。
     func clearingItems() -> Document? {
         guard !items.isEmpty else { return nil }
