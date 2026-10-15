@@ -1,7 +1,7 @@
 # リリース：タグ vX.Y.Z の push で、DMG をビルドして GitHub Release に添付する（SPEC §10.1）。
 #
 #   タグ vX.Y.Z の push（例：git tag v0.1.0 <main の commit> && git push origin v0.1.0）  Info.plist の版がタグと一致し、タグの commit が main に含まれているときだけ、Release を作る
-#   手動実行（Actions タブ → Run workflow。タグを選んでも同じ）  Release は作らない。DMG をアーティファクトに残すだけ（ドライラン）
+#   手動実行（Actions タブ → Run workflow。タグを選んでも同じ）  Release は作らない。DMG をアーティファクトに残し、handoff ジョブが、Release のジョブと同じ手順でダウンロードして SHA-256 を照合する（ドライラン）
 #   Pull Request（リリースに関わるファイルを変えたとき）  同じドライラン。ワークフロー自体は、マージ前に、この経路で検証できる
 # 署名は ad-hoc のまま。署名・公証の鍵や認証情報（secrets）は、このワークフローに渡さない。
 # 権限は最小：ビルドとテストは contents: read、Release の作成だけ contents: write。
@@ -38,7 +38,7 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       asset: ${{ steps.meta.outputs.asset }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # タグの commit が main に含まれるかを調べるため、全部の履歴を取る
 
@@ -113,12 +113,32 @@ jobs:
           cat "dist/${ASSET}.sha256"
           ls -l dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.meta.outputs.asset }}
           path: dist/*
           if-no-files-found: error
           retention-days: 14
+
+  handoff:
+    name: Check the artifact hand-off (no release)
+    needs: build
+    if: github.event_name != 'push' || github.ref_type != 'tag'   # Release を作らない実行だけ。Release のジョブと同じ手順で、受け渡しを確かめる
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.asset }}
+          path: dist
+
+      - name: Check the downloaded files   # release ジョブの同名のステップと、同じ内容に保つ（両方を一緒に直す）
+        env:
+          ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          cd dist
+          ls -l
+          sha256sum -c "${ASSET}.sha256"
 
   release:
     name: Publish the GitHub Release
@@ -129,10 +149,18 @@ jobs:
     permissions:
       contents: write   # Release の作成だけに、書き込みを許す
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: ${{ needs.build.outputs.asset }}
           path: dist
+
+      - name: Check the downloaded files   # handoff ジョブの同名のステップと、同じ内容に保つ（両方を一緒に直す）
+        env:
+          ASSET: ${{ needs.build.outputs.asset }}
+        run: |
+          cd dist
+          ls -l
+          sha256sum -c "${ASSET}.sha256"
 
       - name: Create the release
         env:

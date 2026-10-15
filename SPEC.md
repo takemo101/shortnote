@@ -176,6 +176,7 @@
 - Release を作るのは、タグの commit が `main` に含まれているときだけ。
 - アプリの版（`Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion`）は、タグの `X.Y.Z` と一致していなければならない。一致しないタグでは、Release を作らない。版を上げる変更を `main` に入れてから、その commit にタグを付ける（版の信頼できる元は、ソースの `Info.plist`。ビルドの `VERSION` は、ドライランの版を 0.0.0 にするためだけに使い、タグのビルドでは、`Info.plist` と同じ値になる）。
 - ビルドした DMG は、公開の前に検査する（`scripts/verify-dmg.sh`。ローカルと CI で同じもの）：DMG の整合、中身（アプリ・`/Applications` へのリンク・アイコン）、アプリの版がタグと一致、arm64 と x86_64 の両方を含む、署名の整合。検査に失敗したら、Release を作らない。
+- ビルドと公開のジョブの間のアーティファクトの受け渡しは、Release を作らない実行（手動実行・Pull Request）でも、Release のジョブと同じ手順（同じアクションでダウンロードし、SHA-256 を照合）で検証する（受け渡しの不具合を、実際のリリースまで、見つけられないままにしないため）。Release のジョブは、公開の前に、ダウンロードしたファイルの SHA-256 を照合し、合わなければ Release を作らない。
 - CI は、ビルド・単体テスト・DMG の検査までを行う。実機の操作を含む検証（native E2E）と人間の確認は、CI では行わない（[検証手順](docs/verification.md)）。
 
 ## 11. 構成と制約
