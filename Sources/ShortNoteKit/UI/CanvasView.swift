@@ -140,6 +140,51 @@ final class CanvasView: NSView {
         move = nil
     }
 
+    // MARK: - エージェントの操作（SPEC §3.7）
+    //
+    // 人の入力・ドラッグの途中でも、断らず、壊さず、捨てず、勝手に確定しない。人の途中の状態は、`document` の外
+    // （入力中の文字、ドラッグ中の線・図形）か、`move`（動かしている要素。`document` は、`move.base` から作り直される）にある。
+
+    /// 確定済みの文書。移動のドラッグ中は、動かす前（半端な位置は、確定していない）。
+    var committedDocument: Document { move?.base ?? document }
+
+    /// 人が、文字の入力か、ドラッグ（描く・動かす）の途中か。
+    var isInteracting: Bool { editor.isActive || draft != nil || move != nil }
+
+    /// 要素を、手前に足す。取り消しの 1 段（確定した順）。ドラッグ中の線・図形と、入力中の文字は続き、確定したとき、これらの上に重なる。
+    /// 移動のドラッグ中は、動かす前の文書（`move.base`）にも足す。足さないと、次のドラッグ操作で `document` が作り直されたとき、消える。
+    func appendFromAgent(_ items: [Item]) {
+        guard !items.isEmpty else { return }
+        if let current = move {
+            history.record(previous: current.base)   // 取り消しで戻る先は、動かす前（足す前）の状態
+            move = (current.index, current.base.appending(contentsOf: items))
+            document = document.appending(contentsOf: items)
+        } else {
+            history.record(previous: document)
+            document = document.appending(contentsOf: items)
+        }
+        changed()
+    }
+
+    /// 確定済みの要素を消す（背景は残す）。入力中の文字・ドラッグ中の線・図形は消さない。
+    /// 移動のドラッグ中は、動かしている要素も確定済みなので消え、そのドラッグは終わる。消すものが無ければ `false`。
+    @discardableResult
+    func clearFromAgent() -> Bool {
+        let base = committedDocument
+        guard let cleared = base.clearingItems() else { return false }
+        move = nil
+        history.record(previous: base)
+        document = cleared
+        window?.invalidateCursorRects(for: self)
+        changed()
+        return true
+    }
+
+    /// 確定済みの内容の PNG。入力中の文字は、確定せず、含めない。
+    func renderCommittedPNG() -> Data? {
+        CanvasRenderer.pngData(committedDocument, size: bounds.size, transparent: transparent)
+    }
+
     // MARK: - 画像
 
     /// 画像を背景として開く（CLI 引数・`open`）。新しいキャンバスになる（直前の状態は取り消しで戻せる）。

@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var shortcutsWindow = ShortcutsWindowController(center: shortcuts)
     private var statusMenu: StatusMenu?
     private var hotKey: GlobalHotKey?
+    private var agentService: AgentService?
+    private var agentServer: AgentServer?
 
     /// CLI 引数のうち存在するファイルを絶対パスにして返す（cwd 基準）。
     private func cliPaths() -> [String] {
@@ -52,11 +54,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self, selector: #selector(remoteOpen(_:)), name: openNotification, object: nil
         )
 
-        // 起動したらすぐ描けるよう、ウィンドウは毎回出す（画像を渡されたら背景として開く）。
+        startAgentServer()
+
+        // 起動したらすぐ描けるよう、ウィンドウは毎回出す（画像を渡されたら背景として開く）。CLI の `draw` が起動したときは、フォーカスを奪わない。
         if let path = cliPaths().first {
             controller.load(URL(fileURLWithPath: path))
         }
-        controller.show()
+        if CommandLine.arguments.contains(AppLaunch.noActivateFlag) {
+            controller.showWithoutActivating()
+        } else {
+            controller.show()
+        }
+    }
+
+    /// エージェントからの操作（SPEC §3.7）を受ける、ソケットを開く。開けなくても、アプリは使える（理由を標準エラーに出す）。
+    private func startAgentServer() {
+        let service = AgentService(canvas: controller)
+        let server = AgentServer(path: AgentSocket.path(bundleID: Bundle.main.bundleIdentifier)) { service.handle($0) }
+        switch server.start() {
+        case .success:
+            agentService = service
+            agentServer = server
+        case .failure(let error):
+            FileHandle.standardError.write(Data("ShortNote: エージェント用のソケットを開けません：\(error)\n".utf8))
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        agentServer?.stop()
     }
 
     /// 割り当てが変わったら、全域ホットキー・メニュー・ツールチップ・設定ウィンドウの表示を合わせる。

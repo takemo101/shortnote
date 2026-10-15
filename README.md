@@ -51,7 +51,19 @@ echo '{"version":1,"ops":[
 
 操作は `pen`・`line`・`ellipse`・`rect`・`text`・`image`。範囲外の座標は、キャンバスの縁に丸められます。成功すると、標準出力に 1 行の JSON（出力のパス、ピクセル数、丸めた・足さなかった操作の番号）が出ます。失敗は、標準エラーの JSON と、終了コード（1 操作の JSON が不正、2 引数の誤り、4 ファイルの入出力）です。
 
-常駐中のアプリのキャンバスに、直接書き込む（`draw`・`get`・`export`・`clear`）は、まだ実装していません。
+### 常駐中のアプリのキャンバスに書き込む
+
+メニューバーに常駐している ShortNote のキャンバスに、直接、足すこともできます（人が見ているキャンバスに出て、Cmd+Z でまとめて取り消せます。人が文字を入力している間や、ドラッグしている間も使え、その入力・ドラッグは壊れません）。
+
+```sh
+ShortNote=/Applications/ShortNote.app/Contents/MacOS/ShortNote
+$ShortNote draw ops.json     # 操作を足す（アプリが動いていなければ、フォーカスを奪わずに起動する）。`-` で標準入力
+$ShortNote get               # キャンバスの大きさ・背景・確定済みの要素（操作の JSON と同じ形）・editing
+$ShortNote export            # 確定済みの内容を PNG に書き出して、パスを返す
+$ShortNote clear             # 描いたものを消す（背景は残る。取り消せる）
+```
+
+終了コードは、0 成功、1 操作の JSON が不正（何も適用しない）、2 引数の誤り、3 アプリに届かない（`get`・`export`・`clear` は、動いていなければ起動しない）、4 ファイルの入出力です。アプリとの通信は、同じユーザーだけが使える Unix ドメインソケット（`~/Library/Application Support/ShortNote/`）だけで、ネットワークには出ません。
 
 ## ダウンロード
 
