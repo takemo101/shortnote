@@ -1,5 +1,10 @@
 import AppKit
 
+/// 上を原点にするビュー。スクロールの内容が、ウィンドウの上から並ぶようにする。
+private final class TopAnchoredView: NSView {
+    override var isFlipped: Bool { true }
+}
+
 /// ショートカットの設定ウィンドウ。コマンドごとに、いまのキーと「変更…」「なし」「初期値」を並べる。
 /// 「変更…」を押すと、次に押したキーを記録して割り当てる（Esc で取り消し）。重なる・予約済みのキーは、理由を出して割り当てない。
 final class ShortcutsWindowController: NSObject, NSWindowDelegate {
@@ -14,7 +19,7 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
     init(center: ShortcutCenter) {
         self.center = center
         window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 560),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 500),
             styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
@@ -50,7 +55,7 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         list.spacing = 6
         list.translatesAutoresizingMaskIntoConstraints = false
 
-        let document = NSView()
+        let document = TopAnchoredView()   // 上原点にしないと、一覧が下に寄る
         document.translatesAutoresizingMaskIntoConstraints = false
         document.addSubview(list)
         NSLayoutConstraint.activate([

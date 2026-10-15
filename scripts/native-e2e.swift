@@ -146,6 +146,8 @@ if bundleIdOK, !NSRunningApplication.runningApplications(withBundleIdentifier: b
 func readDefault(_ k: String) -> String? { let r = sh(["defaults", "read", bundleId, k]); return r.0 == 0 ? r.1.trimmingCharacters(in: .whitespacesAndNewlines) : nil }
 let origDefaults: [String: String?] = bundleIdOK ? ["canvasWidthPx": readDefault("canvasWidthPx"), "canvasHeightPx": readDefault("canvasHeightPx")] : [:]
 if bundleIdOK { sh(["defaults", "write", bundleId, "canvasWidthPx", "-int", "960"]); sh(["defaults", "write", bundleId, "canvasHeightPx", "-int", "640"]) }
+// ショートカットの保存先も隔離する（検証用 bundle ID のドメインだけ。利用者の設定ではない）。実行前後に消す。
+if bundleIdOK { sh(["defaults", "delete", bundleId, "keyBindings"]) }
 let proc = Process(); proc.executableURL = URL(fileURLWithPath: buildExe); proc.arguments = ["\(work)/teal.png"]
 proc.standardOutput = FileHandle(forWritingAtPath: "/dev/null"); proc.standardError = FileHandle(forWritingAtPath: "\(work)/cand.log") ?? FileHandle.nullDevice
 try proc.run()
@@ -159,6 +161,7 @@ rec("C0 candidate identity", exePath == buildExe ? "pass" : "fail", "pid \(pid),
 func finish() -> Never {
     // キャンバスサイズの設定を、実行前の状態へ戻す（ユーザーの設定を残さない）
     if bundleIdOK { for (k, v) in origDefaults { if let v { sh(["defaults", "write", bundleId, k, "-int", v]) } else { sh(["defaults", "delete", bundleId, k]) } } }
+    if bundleIdOK { sh(["defaults", "delete", bundleId, "keyBindings"]) }
     if let pf = prevFront, pf.processIdentifier != pid { pf.activate(options: []) }
     if let u = userPB { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(u, forType: .string) }
     let psStart = sh(["ps", "-p", "\(pid)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -612,6 +615,106 @@ if let cf = waitCanvas({ _ in true }) {
         canvasWidthPt = 480
     } else { rec("O2 pasted image keeps its orientation", "blocked", "keyboard guard failed") }
 } else { rec("O1 image orientation", "blocked", "canvas frame unavailable") }
+
+// ---- ショートカット（A14）：既定のキー・設定ウィンドウでの割り当て・競合・保存 ----
+// 全域ホットキー（⌃⌥N）の変更は、OS 全体のキーを使うため、ここでは試さない（人の確認: SNT-001）。
+func radioSelected() -> Int? { radios.firstIndex { (ax($0, "AXValue") as? NSNumber)?.intValue == 1 } }
+func sliderValue() -> Double? { sliders.first.flatMap { (ax($0, "AXValue") as? NSNumber)?.doubleValue } }
+func shortcutsWin() -> AXUIElement? { ((ax(app, "AXWindows") as? [AXUIElement]) ?? []).first { axs($0, "AXTitle") == "ショートカット" } }
+func scElement(_ id: String) -> AXUIElement? { shortcutsWin().flatMap { w in collect(w) { axs($0, "AXIdentifier") == id }.first } }
+func scText(_ id: String) -> String { scElement(id).map { axs($0, "AXValue") } ?? "?" }
+func scPress(_ id: String) -> Bool { scElement(id).map { AXUIElementPerformAction($0, kAXPressAction as CFString) == .success } ?? false }
+func focusedTitle() -> String { (ax(app, "AXFocusedWindow")).map { axs($0 as! AXUIElement, "AXTitle") } ?? "" }
+/// 設定ウィンドウにキー入力してよいか（候補が最前面で、フォーカスが設定ウィンドウ）。
+func shortcutsGuard() -> String? {
+    if NSWorkspace.shared.frontmostApplication?.processIdentifier != pid { NSRunningApplication(processIdentifier: pid)?.activate(options: []) }
+    guard wait(2, { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid }) else { return "frontmost is not the candidate" }
+    guard wait(2, { focusedTitle() == "ショートカット" }) else { return "focused window is '\(focusedTitle())', not the shortcuts window" }
+    return nil
+}
+func openShortcuts() -> Bool { _ = pressMenu("ショートカット…"); return wait(4) { shortcutsWin() != nil } && shortcutsGuard() == nil }
+func closeShortcutsAndShowPanel() {
+    if let w = shortcutsWin(), let c = ax(w, "AXCloseButton") { _ = AXUIElementPerformAction(c as! AXUIElement, kAXPressAction as CFString) }
+    _ = wait(2) { shortcutsWin() == nil }
+    _ = pressMenu("ShortNote を開く"); _ = wait(3) { candWindow(pid) != nil }
+}
+if let why = keyGuard(pid, app) {
+    for id in ["K1 keys 1-5 select tools", "K2 [ ] change brush size", "K3 copy-path key", "K4-K9 reassigning shortcuts"] { rec(id, "blocked", "keyboard guard: \(why)") }
+} else {
+    let toolKeys: [(CGKeyCode, Int)] = [(20, 2), (21, 3), (23, 4), (19, 1), (18, 0)]
+    var seen: [Int?] = []
+    for (code, _) in toolKeys { key(code, []); seen.append(radioSelected()) }
+    rec("K1 default keys 1-5 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1 the selected segment was \(seen) (expect [2, 3, 4, 1, 0])")
+
+    let v0 = sliderValue(); key(30, []); let v1 = sliderValue(); key(33, []); let v2 = sliderValue()
+    if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 40 as CFNumber) }
+    key(30, []); let vMax = sliderValue()
+    if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 1 as CFNumber) }
+    key(33, []); let vMin = sliderValue()
+    if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 4 as CFNumber) }
+    rec("K2 ] / [ change the brush size by 2 and stop at the ends (the slider follows)",
+        (v0 != nil && v1 == v0.map { $0 + 2 } && v2 == v0 && vMax == 40 && vMin == 1) ? "pass" : "fail",
+        "start \(String(describing: v0)) -> ] \(String(describing: v1)) -> [ \(String(describing: v2)); at 40 ] -> \(String(describing: vMax)); at 1 [ -> \(String(describing: vMin))")
+
+    NSPasteboard.general.clearContents(); NSPasteboard.general.setString("SNV-SENTINEL", forType: .string)
+    key(8, [.maskCommand, .maskShift])
+    var copied: String? = nil
+    _ = wait(4) { let s = NSPasteboard.general.string(forType: .string); if let s, s != "SNV-SENTINEL" { copied = s; return true }; return false }
+    rec("K3 Cmd+Shift+C puts the exported PNG path on the clipboard", (copied.map { $0.hasPrefix(outDir) && $0.hasSuffix(".png") && load($0) != nil } ?? false) ? "pass" : "fail", "clipboard=\(copied ?? "unchanged")")
+
+    if openShortcuts() {
+        rec("K4 the status menu opens the shortcuts window", scText("keys-toolPen") == "1" && scText("keys-undo") == "⌘Z / ⌃Z" ? "pass" : "fail",
+            "window shown; Pen=\(scText("keys-toolPen")) Undo=\(scText("keys-undo")) Showpanel=\(scText("keys-showPanel"))")
+
+        // 割り当て: ペンを P にする
+        var changed = false
+        if scPress("change-toolPen"), wait(2, { scText("keys-toolPen").contains("キーを押して") }), shortcutsGuard() == nil {
+            key(35, [])
+            changed = wait(2) { scText("keys-toolPen") == "P" }
+        }
+        let saved = bundleIdOK ? readDefault("keyBindings") != nil : false
+        let msg5 = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
+        closeShortcutsAndShowPanel()
+        var effect = false, oldDead = false
+        if keyGuard(pid, app) == nil, selectTool(2) {
+            key(35, []); effect = radioSelected() == 0          // P でペンになる
+            _ = selectTool(2); key(18, []); oldDead = radioSelected() == 2   // 1 では、もう変わらない
+        }
+        rec("K5 a reassigned key works, the old key stops, and the change is saved", (changed && effect && oldDead && (saved || !bundleIdOK)) ? "pass" : "fail",
+            "window shows P=\(changed) P selects pen=\(effect) old '1' ignored=\(oldDead) saved=\(saved) message='\(msg5)'")
+
+        // 競合と予約と取り消し
+        if openShortcuts() {
+            var conflict = false, reserved = false, cancelled = false
+            if scPress("change-toolEllipse"), wait(2, { scText("keys-toolEllipse").contains("キーを押して") }), shortcutsGuard() == nil {
+                key(20, [])   // 3 は「四角」が使っている
+                let m = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
+                conflict = m.contains("ツール: 四角") && scText("keys-toolEllipse") == "2"
+                rec("K6 a key used by another command is refused with the reason, and nothing changes", conflict ? "pass" : "fail", "message='\(m)' ellipse now=\(scText("keys-toolEllipse"))")
+            } else { rec("K6 conflict is refused", "blocked", "could not start recording") }
+            if scPress("change-toolEllipse"), wait(2, { scText("keys-toolEllipse").contains("キーを押して") }), shortcutsGuard() == nil {
+                key(8, .maskCommand)   // Cmd+C は予約
+                let m = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
+                reserved = m.contains("割り当てられません") && scText("keys-toolEllipse") == "2"
+                rec("K7 a reserved key (Cmd+C) is refused", reserved ? "pass" : "fail", "message='\(m)' ellipse now=\(scText("keys-toolEllipse"))")
+            } else { rec("K7 reserved key is refused", "blocked", "could not start recording") }
+            if scPress("change-toolEllipse"), wait(2, { scText("keys-toolEllipse").contains("キーを押して") }), shortcutsGuard() == nil {
+                key(53, [])   // Esc で取り消し。設定ウィンドウは閉じない
+                cancelled = wait(2) { scText("keys-toolEllipse") == "2" } && shortcutsWin() != nil
+                rec("K8 Esc cancels recording without closing the window", cancelled ? "pass" : "fail", "ellipse now=\(scText("keys-toolEllipse")) window open=\(shortcutsWin() != nil)")
+            } else { rec("K8 Esc cancels recording", "blocked", "could not start recording") }
+
+            // すべて初期値に戻す
+            let pressed = scPress("shortcuts-reset-all")
+            let back = wait(2) { scText("keys-toolPen") == "1" }
+            let cleared = bundleIdOK ? wait(2) { readDefault("keyBindings") == nil } : true
+            closeShortcutsAndShowPanel()
+            var works = false
+            if keyGuard(pid, app) == nil, selectTool(2) { key(18, []); works = radioSelected() == 0 }
+            rec("K9 reset-all restores the defaults and removes the saved overrides", (pressed && back && cleared && works) ? "pass" : "fail", "pressed=\(pressed) window shows 1=\(back) saved value removed=\(cleared) '1' selects pen again=\(works)")
+        } else { rec("K6-K9 conflict / reserved / cancel / reset-all", "blocked", "could not reopen the shortcuts window") }
+    } else { rec("K4-K9 shortcuts window", "blocked", "the status menu item did not open a focused 'ショートカット' window") }
+}
 
 // Esc last
 if keyGuard(pid, app) == nil {
