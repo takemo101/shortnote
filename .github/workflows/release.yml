@@ -1,6 +1,6 @@
 # リリース：タグ vX.Y.Z の push で、DMG をビルドして GitHub Release に添付する（SPEC §10.1）。
 #
-#   git tag v1.0.0 <main の commit> && git push origin v1.0.0   タグの commit が main に含まれているときだけ、Release を作る
+#   タグ vX.Y.Z の push（例：git tag v0.1.0 <main の commit> && git push origin v0.1.0）  Info.plist の版がタグと一致し、タグの commit が main に含まれているときだけ、Release を作る
 #   手動実行（Actions タブ → Run workflow。タグを選んでも同じ）  Release は作らない。DMG をアーティファクトに残すだけ（ドライラン）
 #   Pull Request（リリースに関わるファイルを変えたとき）  同じドライラン。ワークフロー自体は、マージ前に、この経路で検証できる
 # 署名は ad-hoc のまま。署名・公証の鍵や認証情報（secrets）は、このワークフローに渡さない。
