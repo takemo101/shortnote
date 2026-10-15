@@ -1,5 +1,7 @@
 # ShortNote の開発用コマンド。`just` で一覧を表示する。
 
+set positional-arguments
+
 app := justfile_directory() / "build/ShortNote.app"
 exe := app / "Contents/MacOS/ShortNote"
 
@@ -14,15 +16,15 @@ default:
 build:
     ./scripts/build.sh
 
-# ビルドして、普段どおり起動する。ウィンドウが出て、閉じてもメニューバーに常駐する（再び出すのは ⌃⌥N かメニューバーのアイコン）
+# ビルドして、普段どおり起動する。ウィンドウが出て、閉じてもメニューバーに常駐する（再び出すのは ⌃⌥N かメニューバーのアイコン）。常駐中の旧いインスタンスがあると、それが前面に出るだけで新しいビルドにならない（先に終了する）
 run: build
     open "{{app}}"
 
 # ビルドして、実行ファイルを端末から起動する（ウィンドウが出て、ログが端末に出る。Ctrl-C で終了）。画像パスを渡すと背景として開く。常駐中のインスタンスがあると、転送して即終了する
 try *image: build
-    "{{exe}}" {{image}}
+    "{{exe}}" "$@"
 
-# 書き出し済みの PNG と、保存したキャンバスのサイズを消して、初回の状態に戻す
+# 書き出し済みの PNG と、保存したキャンバスのサイズを消して、初回の状態に戻す（インストール済みの ShortNote の保存サイズも消える）
 reset-try:
     rm -rf '{{notes_dir}}'
     -defaults delete {{bundle_id}} canvasWidthPx
@@ -32,6 +34,6 @@ reset-try:
 package:
     ./scripts/dmg.sh
 
-# 実機の native E2E を実行する（マウスとキーボードに触れない。検証手順は docs/verification.md）
+# 実機の native E2E を実行する。bundle ID を変えたコピーで走るので、常駐中の ShortNote と保存サイズには触れない。実行中はマウスとキーボードに触れない（検証手順は docs/verification.md）
 e2e: build
-    /usr/bin/swift scripts/native-e2e.swift "{{exe}}" --artifacts "{{justfile_directory()}}/build/native-e2e"
+    ./scripts/e2e.sh

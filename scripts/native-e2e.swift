@@ -138,6 +138,11 @@ FileManager.default.createFile(atPath: "\(work)/cand.log", contents: nil, attrib
 let infoPlistPath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Info.plist").path
 let bundleId = sh(["plutil", "-extract", "CFBundleIdentifier", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
 let bundleIdOK = !bundleId.isEmpty && !bundleId.contains(" ") && bundleId.contains(".")
+// 同じ bundle ID の常駐があると、起動が転送され（候補が出ない）、保存したサイズも本番のものと混ざる。scripts/e2e.sh は bundle ID を変えたコピーで実行する。
+if bundleIdOK, !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
+    print("blocked: an instance with bundle id \(bundleId) is already running; it would receive the launch and its saved canvas size would be touched.\nUse scripts/e2e.sh (re-signed copy with another bundle id), or quit that instance first.")
+    exit(77)
+}
 func readDefault(_ k: String) -> String? { let r = sh(["defaults", "read", bundleId, k]); return r.0 == 0 ? r.1.trimmingCharacters(in: .whitespacesAndNewlines) : nil }
 let origDefaults: [String: String?] = bundleIdOK ? ["canvasWidthPx": readDefault("canvasWidthPx"), "canvasHeightPx": readDefault("canvasHeightPx")] : [:]
 if bundleIdOK { sh(["defaults", "write", bundleId, "canvasWidthPx", "-int", "960"]); sh(["defaults", "write", bundleId, "canvasHeightPx", "-int", "640"]) }
@@ -424,12 +429,14 @@ if let aw = axWindow(), let c0 = canvasFrame(), let w0 = axSize(aw) {
                 if let r = exportImg() {
                     let longest = max(r.pixelsWide, r.pixelsHigh)
                     let penKept = isDark(darkest(r, 360, 30))
-                    rec("Z3 zoom button maximizes; canvas fills it; export stays within the size cap", (penKept && longest <= 8192) ? "pass" : "fail",
-                        "canvas \(Int(c1.width))x\(Int(c1.height)) -> \(Int(cz.width))x\(Int(cz.height)); export \(r.pixelsWide)x\(r.pixelsHigh) (longest \(longest) <= 8192); pen stroke kept=\(penKept)")
+                    let wz = candWindow(pid).map { bounds($0) } ?? .zero
+                    let fills = NSScreen.screens.contains { abs($0.visibleFrame.width - wz.width) < 3 && abs($0.visibleFrame.height - wz.height) < 3 }   // ウィンドウが、いずれかの画面の表示領域いっぱいになる
+                    rec("Z3 zoom button maximizes: the window fills the screen's visible area; canvas grows; export is 2x the canvas", (penKept && fills && longest <= 8192 && r.pixelsWide == Int(cz.width * 2)) ? "pass" : "fail",
+                        "window \(Int(wz.width))x\(Int(wz.height)) fills a screen's visible area=\(fills); canvas \(Int(c1.width))x\(Int(c1.height)) -> \(Int(cz.width))x\(Int(cz.height)); export \(r.pixelsWide)x\(r.pixelsHigh); pen stroke kept=\(penKept). (8192 px cap itself is not exercised: 2x of this screen stays below it)")
                 }
                 _ = AXUIElementPerformAction(zb as! AXUIElement, kAXPressAction as CFString)   // もとの大きさへ
-                let back = waitCanvas({ $0.width < cz.width - 100 })
-                rec("Z4 zoom button again restores the previous size", back != nil ? "pass" : "fail", "canvas after second press: \(back.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unchanged")")
+                let back = waitCanvas({ abs($0.width - c1.width) < 2 && abs($0.height - c1.height) < 2 })   // 最大化の前の大きさに、実際に戻ること
+                rec("Z4 zoom button again restores the size it had before maximizing", back != nil ? "pass" : "fail", "expected canvas \(Int(c1.width))x\(Int(c1.height)); after second press: \(canvasFrame().map { "\(Int($0.width))x\(Int($0.height))" } ?? "unavailable")")
             } else { rec("Z3 zoom button maximizes", "fail", "canvas did not grow after AXPress on the zoom button (zoom button enabled=\(String(describing: ax(zb as! AXUIElement, "AXEnabled"))))") }
         } else { rec("Z3 zoom button maximizes", "fail", "the window has no AXZoomButton") }
     } else { rec("Z2 growing the window grows the canvas", "fail", "canvas did not grow after setting AXSize") }

@@ -44,7 +44,7 @@ macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）。外
 
 ```sh
 open "$PWD/build/ShortNote.app"                              # 起動（相対パスだと見つからない）
-open "$PWD/build/ShortNote.app" --args /path/to/image.png    # 画像を背景として開く
+open -a "$PWD/build/ShortNote.app" /path/to/image.png        # 画像を背景として開く（起動済みでも、常駐中のウィンドウに入る）
 ```
 
 - アプリが保存する設定は、キャンバスのサイズだけ（`UserDefaults`、bundle ID `dev.takemo101.shortnote` の `canvasWidthPx`・`canvasHeightPx`）。書き出し先は固定の `/tmp/shortnote/`。検証では、bundle ID を変えたコピーを使うと、設定も常駐の転送も本番と分かれる（native E2E は、候補の設定を実行前に標準へそろえ、終了時に元へ戻す）。
