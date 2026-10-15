@@ -140,7 +140,7 @@ let bundleId = sh(["plutil", "-extract", "CFBundleIdentifier", "raw", infoPlistP
 let bundleIdOK = !bundleId.isEmpty && !bundleId.contains(" ") && bundleId.contains(".")
 // 同じ bundle ID の常駐があると、起動が転送され（候補が出ない）、保存したサイズも本番のものと混ざる。scripts/e2e.sh は bundle ID を変えたコピーで実行する。
 if bundleIdOK, !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
-    print("blocked: an instance with bundle id \(bundleId) is already running; it would receive the launch and its saved canvas size would be touched.\nUse scripts/e2e.sh (re-signed copy with another bundle id), or quit that instance first.")
+    print("blocked: an instance with bundle id \(bundleId) is already running; it would receive the launch and its saved canvas size would be touched.\nUse scripts/e2e.sh (re-signed copy with another bundle id), or quit that instance first (a stale candidate left by a crashed run counts too: stop it by its recorded PID).")
     exit(77)
 }
 func readDefault(_ k: String) -> String? { let r = sh(["defaults", "read", bundleId, k]); return r.0 == 0 ? r.1.trimmingCharacters(in: .whitespacesAndNewlines) : nil }

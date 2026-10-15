@@ -172,7 +172,12 @@ final class CanvasView: NSView {
     }
 
     /// ポインタ操作の途中（描いている線・移動中の要素）を捨てる。ボタンを押したまま取り消し・貼り付けをされても、古い状態を書き戻さないように。
+    /// 移動の途中なら、移動前の状態へ戻す（取り消し・やり直し・追加が、半端な位置を履歴に残さない）。
     private func cancelPointerInteraction() {
+        if let base = moveBase {
+            doc = base
+            needsDisplay = true
+        }
         draft = nil
         moveIndex = nil
         moveBase = nil
@@ -194,9 +199,12 @@ final class CanvasView: NSView {
 
     // MARK: - Images (paste / drop / file picker)
 
-    /// 内容の型（`contentType`）を先に見て、無ければ拡張子で判断する（拡張子の無い・違うファイルも読めるように）。
+    /// ファイルの種類（型）が画像なら画像。型が不明・汎用（拡張子が無い・合わないファイルは `public.data` などになる）のときは、
+    /// 後段の `images(at:)` が実際に画像として読めるかで判断する。画像以外の型（テキストなど）は受け付けない。
     private static func isImageFile(_ url: URL) -> Bool {
-        if let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType { return type.conforms(to: .image) }
+        if let type = (try? url.resourceValues(forKeys: [.contentTypeKey]))?.contentType {
+            return type.conforms(to: .image) || type == .data || type.isDynamic
+        }
         return UTType(filenameExtension: url.pathExtension)?.conforms(to: .image) == true
     }
 
@@ -247,6 +255,7 @@ final class CanvasView: NSView {
 
     private func place(_ images: [NSImage], at center: CGPoint) -> Bool {
         guard !images.isEmpty else { NSSound.beep(); return false }
+        cancelPointerInteraction()   // 移動の途中なら、移動前に戻してから足す（履歴に半端な位置を残さない）
         var new = doc
         for (i, image) in images.enumerated() {
             // 複数枚は少しずらして重ね、全部見えるようにする。

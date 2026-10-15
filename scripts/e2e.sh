@@ -12,6 +12,6 @@ COPY=build/ShortNoteE2E.app
 rm -rf "$COPY"
 cp -R build/ShortNote.app "$COPY"
 plutil -replace CFBundleIdentifier -string dev.takemo101.shortnote.e2e "$COPY/Contents/Info.plist"
-codesign --force --sign - "$COPY" >/dev/null 2>&1
+codesign --force --sign - "$COPY" >/dev/null 2>&1 || { echo "e2e.sh: codesign of $COPY failed" >&2; exit 1; }
 
 exec /usr/bin/swift scripts/native-e2e.swift "$PWD/$COPY/Contents/MacOS/ShortNote" --artifacts "$PWD/build/native-e2e"
