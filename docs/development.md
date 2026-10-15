@@ -36,8 +36,9 @@ macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）。外
 | `just build` | `./scripts/build.sh`。`build/ShortNote.app`（arm64 + x86_64）を ad-hoc 署名で作る |
 | `just run` | ビルドして `open` で起動する。ウィンドウが出て、閉じてもメニューバーに常駐する（再び出すのは ⌃⌥N かメニューバーのアイコン）。常駐中に実行すると、そのウィンドウを出す |
 | `just try [画像]` | ビルドして、実行ファイルを端末から起動する。ウィンドウが出て、ログが端末に出る。Ctrl-C で終了する。画像パスを渡すと背景として開く。**常駐中のインスタンスがあると、新しい起動はそちらへ転送して即終了する**（古い常駐を終了してから実行する） |
-| `just reset-try` | 書き出し済みの PNG（`/tmp/shortnote/`）と、保存したキャンバスのサイズを消す。ShortNote が持つ状態はこの 2 つ |
+| `just reset-try` | 書き出し済みの PNG（`/tmp/shortnote/`）と、保存したキャンバスのサイズ・ショートカットの割り当てを消す。ShortNote が持つ状態はこの 2 つ |
 | `just package` | `./scripts/dmg.sh`。`build/ShortNote.dmg` を作る（[配布物](#配布物)） |
+| `just test` | `./scripts/test.sh`。単体テスト（Swift Testing）を実行する。画面や実入力は使わない。Command Line Tools だけの環境では、`swift test` にマクロプラグインのパスを渡す必要があり、素の `swift test` は失敗することがある |
 | `just e2e` | ビルドして native E2E を実行する（[検証の入口](verification.md#検証の入口)）。実行中はマウスとキーボードに触れない |
 
 手で起動する場合：

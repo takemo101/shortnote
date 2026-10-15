@@ -5,7 +5,7 @@ set positional-arguments
 app := justfile_directory() / "build/ShortNote.app"
 exe := app / "Contents/MacOS/ShortNote"
 
-# 書き出し先（アプリ固定）と、設定の保存先（キャンバスのサイズだけを保存する）。ShortNote が持つ状態はこの 2 つ
+# 書き出し先（アプリ固定）と、設定の保存先（キャンバスのサイズとショートカットの割り当てだけを保存する）。ShortNote が持つ状態はこの 2 つ
 notes_dir := "/tmp/shortnote"
 bundle_id := "dev.takemo101.shortnote"
 
@@ -24,15 +24,20 @@ run: build
 try *image: build
     "{{exe}}" "$@"
 
-# 書き出し済みの PNG と、保存したキャンバスのサイズを消して、初回の状態に戻す（インストール済みの ShortNote の保存サイズも消える）
+# 書き出し済みの PNG と、保存したキャンバスのサイズ・ショートカットの割り当てを消して、初回の状態に戻す（インストール済みの ShortNote の保存値も消える）
 reset-try:
     rm -rf '{{notes_dir}}'
     -defaults delete {{bundle_id}} canvasWidthPx
     -defaults delete {{bundle_id}} canvasHeightPx
+    -defaults delete {{bundle_id}} keyBindings
 
 # build/ShortNote.dmg を作る（署名・公証は SIGN_IDENTITY / NOTARY_PROFILE を渡したときだけ。scripts/dmg.sh を参照）
 package:
     ./scripts/dmg.sh
+
+# 単体テスト（Swift Testing）。画面や実入力は使わない
+test:
+    ./scripts/test.sh
 
 # 実機の native E2E を実行する。bundle ID を変えたコピーで走るので、常駐中の ShortNote と保存サイズには触れない。実行中はマウスとキーボードに触れない（検証手順は docs/verification.md）
 e2e: build
