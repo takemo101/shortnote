@@ -48,7 +48,7 @@ open "$PWD/build/ShortNote.app"                              # 起動（相対�
 open -a "$PWD/build/ShortNote.app" /path/to/image.png        # 画像を背景として開く（起動済みでも、常駐中のウィンドウに入る）
 ```
 
-- アプリが保存する設定は、キャンバスのサイズだけ（`UserDefaults`、bundle ID `dev.takemo101.shortnote` の `canvasWidthPx`・`canvasHeightPx`）。書き出し先は固定の `/tmp/shortnote/`。検証では、bundle ID を変えたコピーを使うと、設定も常駐の転送も本番と分かれる（native E2E は、候補の設定を実行前に標準へそろえ、終了時に元へ戻す）。
+- アプリが保存する設定は、キャンバスのサイズ（`canvasWidthPx`・`canvasHeightPx`）と、既定から変えたショートカットの割り当て（`keyBindings`）だけ（`UserDefaults`、bundle ID `dev.takemo101.shortnote`）。書き出し先は固定の `/tmp/shortnote/`。検証では、bundle ID を変えたコピーを使うと、設定も常駐の転送も本番と分かれる（native E2E は、候補のこれらの設定を、実行前に控えて標準へそろえ、終了時に元へ戻す）。
 - 常駐中のインスタンスがあると、新しい起動はそちらへ転送して終了する。**検証用に起動する前に、古い候補が残っていないか確認する**（残っていると、新しい候補がウィンドウを出さずに終了する）。確認と終了は、自分が起動した PID を、起動時刻と実行ファイルを照合して行い、名前での一括終了はしない。
 - `swift build` のログに `x86_64 architecture is deprecated` の警告が出る。Intel を配布対象から外す判断をするまで、Universal を維持する。
 
