@@ -31,9 +31,13 @@
 macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）が必要です。
 
 ```sh
-./scripts/build.sh    # build/ShortNote.app（arm64 + x86_64 の Universal）
-./scripts/dmg.sh      # build/ShortNote.dmg
+just build    # build/ShortNote.app（arm64 + x86_64 の Universal）
+just run      # ビルドして起動（メニューバーに常駐）
+just try      # ビルドして前面で起動（ログが端末に出る）。画像を渡すなら: just try path/to/image.png
+just package  # build/ShortNote.dmg
 ```
+
+`just` が無い場合は、`./scripts/build.sh` と `./scripts/dmg.sh` を直接実行できます。レシピの一覧は `just` で表示します。
 
 `dmg.sh` は既定で ad-hoc 署名です。他の Mac では Gatekeeper に止められるので、右クリック →「開く」、または次のコマンドで検疫属性を外します。
 

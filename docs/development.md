@@ -29,10 +29,22 @@ ShortNote の調査・変更・Issue・PR・配布物を、一つの作業単位
 
 macOS 13 以降、Swift 5.9 以降（Xcode または Command Line Tools）。外部依存はない。
 
+`just` で入口を一覧できる（[justfile](../justfile)）。`just` が無い環境では、同じ処理を `scripts/` から直接実行する。
+
+| レシピ | 内容 |
+|---|---|
+| `just build` | `./scripts/build.sh`。`build/ShortNote.app`（arm64 + x86_64）を ad-hoc 署名で作る |
+| `just run` | ビルドして `open` で起動する。メニューバーに常駐し、ウィンドウは出さない（⌃⌥N、メニューバーのアイコン、または 2 回目の `just run` で出す） |
+| `just try [画像]` | ビルドして、実行ファイルを前面で起動する。ログが端末に出て、Ctrl-C で終了する。画像パスを渡すと背景として開く。常駐中のインスタンスがあると、転送して即終了する |
+| `just reset-try` | 書き出し済みの PNG（`/tmp/shortnote/`）を消す。ShortNote が持つ唯一の状態 |
+| `just package` | `./scripts/dmg.sh`。`build/ShortNote.dmg` を作る（[配布物](#配布物)） |
+| `just e2e` | ビルドして native E2E を実行する（[検証の入口](verification.md#検証の入口)）。実行中はマウスとキーボードに触れない |
+
+手で起動する場合：
+
 ```sh
-./scripts/build.sh                 # build/ShortNote.app（arm64 + x86_64）を ad-hoc 署名で作る
-open "$PWD/build/ShortNote.app"    # 起動（相対パスだと見つからない）
-open "$PWD/build/ShortNote.app" --args /path/to/image.png   # 画像を背景として開く
+open "$PWD/build/ShortNote.app"                              # 起動（相対パスだと見つからない）
+open "$PWD/build/ShortNote.app" --args /path/to/image.png    # 画像を背景として開く
 ```
 
 - アプリは設定を持たず、書き出し先は固定の `/tmp/shortnote/` である。実行の前後で隔離すべき設定・保存先はない。

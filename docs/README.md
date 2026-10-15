@@ -33,6 +33,7 @@ AGENTS.md              開発規約
 Package.swift          SwiftPM（macOS 13、外部依存なし）
 Resources/Info.plist   バンドル設定（LSUIElement・配備下限）
 Sources/ShortNote/     実装
+justfile               開発用コマンド（build・run・try・reset-try・package・e2e）
 scripts/
   build.sh             Universal の ShortNote.app を build/ に作る
   dmg.sh               build/ShortNote.dmg を作る（署名・公証は任意）
