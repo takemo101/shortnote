@@ -45,6 +45,7 @@
 - ユーザーが PR を依頼した場合は、その対象の検証・独立レビュー → scoped commit → PR 作成 → `main` への通常マージ → GitButler 同期まで、段階ごとの再承認なしで行う。draft・review-only・no-merge・別 target の明示は優先する。PR 依頼なしの変更を自動 commit/push/PR 化しない。
 - 必要な変更だけを `but commit -b <branch> -m <message> <ids...>` で選び、`but pr new <branch> -F <message-file>` で作成する。PR の target・head・files と required checks・reviews・mergeability を確認し、head 変更後に古いレビューを流用しない。
 - 適用できる but の通常 PR merge がなく、GitHub auto-merge も使えない場合だけ、review 済み head に束縛した `gh pr merge <number> --repo takemo101/shortnote --merge --match-head-commit <sha>` を例外として許す。admin・force・保護迂回・auto-merge 設定変更・`but land` による PR 回避は禁止する。
+- `but` にタグの操作がない。ユーザーがリリースを依頼したときだけ、`main` に含まれる commit に、新しい `vX.Y.Z` のタグを、GitHub の API（`gh api repos/takemo101/shortnote/git/refs -f ref=refs/tags/vX.Y.Z -f sha=<commit>`）でサーバー側に作ることを、例外として許す。先に、`Resources/Info.plist` の版をその `X.Y.Z` にして `main` に入れておく。既存のタグの削除・移動、強制、別のタグ名・別の commit への作成、依頼のないタグの作成は禁止する。手順は [リリースの手順](docs/development.md#リリースの手順)。
 - GitHub の `MERGED` と merge commit を観測した後、`but pull --check` と `but pull --status-after` で同期する。merge commit の反映、残る変更・conflict・制約を報告し、Report と当該受け入れが揃ってから completed にする。無関係な変更を reset/discard で消さない。詳しい手順と注意（`unapply` が作業ツリーのファイルを外すことなど）は [GitButler と PR](docs/development.md#gitbutler-と-pr-の一連の手順) を参照する。
 
 ## 設計と実装

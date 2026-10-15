@@ -130,10 +130,10 @@ Git の書込みは `but` を使う。統合先は `main`、GitButler target は
 
 ### リリースの手順
 
-`.github/workflows/release.yml` が、タグ `vX.Y.Z` の push で、DMG をビルドして GitHub Release に添付する。**リリースの公開は、ユーザーの依頼で行う。依頼なしにタグを打たない。**
+`.github/workflows/release.yml` が、タグ `vX.Y.Z` の push で、DMG をビルドして GitHub Release に添付する。**リリースの公開は、ユーザーの依頼があったときだけ行う。依頼なしにタグを作らない。**
 
-1. 公開したい commit が `main` に入っていること（`main` に含まれない commit のタグでは、Release を作らない）。版は、アプリの `CFBundleShortVersionString` と `CFBundleVersion` に、タグの `X.Y.Z` が入る（`VERSION` を `build.sh` に渡す）。
-2. **ユーザーが、自分の端末で**、タグを作って push する：`git tag vX.Y.Z <main の commit> && git push origin vX.Y.Z`。Git の書込みは `but` を使う規約だが、`but` にはタグの操作がない（確認済み）。エージェントは、規約により raw Git で書き込まないので、タグを打たない。
+1. **版を上げる**：`Resources/Info.plist` の `CFBundleShortVersionString` と `CFBundleVersion` を、リリースする `X.Y.Z` にして、PR で `main` に入れる（版の信頼できる元は、ソースの `Info.plist`。タグと一致しないと、ワークフローが Release を作らずに失敗する）。
+2. **タグを作る**：版を入れた `main` の commit に、タグ `vX.Y.Z` を作る。ユーザーが自分の端末で `git tag vX.Y.Z <main の commit> && git push origin vX.Y.Z` としてもよい。エージェントが依頼を受けて作るときは、`but` にタグの操作がなく、raw Git で書き込めないので、GitHub の API でサーバー側に作る：`gh api repos/takemo101/shortnote/git/refs -f ref=refs/tags/vX.Y.Z -f sha=<main の commit の SHA>`。軽量タグで、push のイベントが通常どおり発火する。
 3. ワークフローが、単体テスト → `VERSION=X.Y.Z ./scripts/dmg.sh` → `./scripts/verify-dmg.sh`（整合・中身・アイコン・版・Universal・署名）→ `ShortNote-X.Y.Z.dmg` と `.sha256` の作成、の順に進み、通ったときだけ Release を作る。Release のノートには、インストールと Gatekeeper の回避手順を付け、変更点は GitHub が生成する。
 4. タグを打たずに確かめたいときは、Actions タブ → release → Run workflow（`workflow_dispatch`。ワークフローが `main` に入ってから使える。タグを選んで起動しても、Release は作らない）。DMG をアーティファクト（14 日）に残す。リリースに関わるファイル（ワークフロー、ビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request でも、同じドライランが自動で走る（マージ前に、ワークフロー自体を検証できる）。
 
