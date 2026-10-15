@@ -97,7 +97,7 @@ func dumpTree(_ app: AXUIElement) -> String {
 func post(_ t: CGEventType, _ p: CGPoint) { CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)!.post(tap: .cghidEventTap); usleep(12_000) }
 func line(_ a: CGPoint, _ b: CGPoint, steps: Int = 24) -> [CGPoint] { (0...steps).map { CGPoint(x: a.x + (b.x - a.x) * CGFloat($0) / CGFloat(steps), y: a.y + (b.y - a.y) * CGFloat($0) / CGFloat(steps)) } }
 func drag(_ pts: [CGPoint], pid: pid_t) -> Bool {
-    for p in [pts.first!, pts[pts.count / 2], pts.last!] where hitOwner(p) != pid { return false }
+    for p in [pts.first!, pts[pts.count / 2], pts.last!] where hitOwner(p) != pid { print("   guard refused drag at \(p): front-most owner=\(String(describing: hitOwner(p))) want \(pid)"); return false }
     post(.mouseMoved, pts[0]); post(.leftMouseDown, pts[0])
     for p in pts.dropFirst() { post(.leftMouseDragged, p) }
     post(.leftMouseUp, pts.last!); usleep(150_000); return true
@@ -268,7 +268,7 @@ func countDark(_ r: NSBitmapImageRep, _ x0: Double, _ y0: Double, _ x1: Double, 
     return n
 }
 func isColor(_ p: Px, _ r: Double, _ g: Double, _ b: Double) -> Bool { abs(p.r - r) < 0.12 && abs(p.g - g) < 0.12 && abs(p.b - b) < 0.12 && p.a > 0.95 }
-func click(_ p: CGPoint) -> Bool { guard hitOwner(p) == pid else { return false }; post(.mouseMoved, p); post(.leftMouseDown, p); post(.leftMouseUp, p); usleep(250_000); return true }
+func click(_ p: CGPoint) -> Bool { guard hitOwner(p) == pid else { print("   guard refused click at \(p): front-most owner=\(String(describing: hitOwner(p))) want \(pid)"); return false }; post(.mouseMoved, p); post(.leftMouseDown, p); post(.leftMouseUp, p); usleep(250_000); return true }
 func typeUnicode(_ s: String) {
     for unit in s.utf16 {
         var u = [unit]
@@ -381,6 +381,24 @@ if let cap = capturePanel("panel2") {
 if keyGuard(pid, app) == nil {
     key(53, [])
     rec("C14 Esc hides panel", wait(2) { candWindow(pid) == nil } ? "pass" : "fail", "on-screen panel gone: \(candWindow(pid) == nil)")
+}
+
+// ---- 引数なしの起動でもウィンドウが出る（SPEC 3.1「起動したらすぐ描ける」）----
+// 常駐インスタンスがあると転送されて終了するので、先に最初の候補を（起動時刻と実行ファイルを照合して）終了する。
+let firstStart = sh(["ps", "-p", "\(pid)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+if firstStart == startTime { kill(pid, SIGTERM); _ = wait(3) { !proc.isRunning } }
+if proc.isRunning {
+    rec("C18 launch without arguments shows the panel", "blocked", "the first candidate did not exit; a resident instance would forward the launch")
+} else {
+    let p3 = Process(); p3.executableURL = URL(fileURLWithPath: buildExe)
+    p3.standardOutput = FileHandle(forWritingAtPath: "/dev/null"); p3.standardError = FileHandle(forWritingAtPath: "/dev/null")
+    try p3.run()
+    let pid3 = p3.processIdentifier
+    let start3 = sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+    let shown = wait(6) { candWindow(pid3) != nil }
+    let b3 = candWindow(pid3).map { bounds($0) } ?? .zero
+    rec("C18 launch without arguments shows the panel", shown ? "pass" : "fail", "pid \(pid3) on-screen 'ShortNote' window within 6s: \(shown) bounds \(b3)")
+    if sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == start3 { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
 }
 
 finish()

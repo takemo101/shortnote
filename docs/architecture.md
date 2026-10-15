@@ -9,7 +9,7 @@ ShortNote の Module の責務・状態の所有・座標と倍率・失敗の�
 | Module | 責務 | 持つ状態 |
 |---|---|---|
 | `main.swift` | `NSApplication` を accessory（Dock に出ない）で起動する | なし |
-| `AppDelegate` | メニューバーの項目、全域ショートカット ⌃⌥N の登録、多重起動の転送、`open` や CLI 引数での画像受け取り | `statusItem`、`hotKey`、遅延生成の `PaintController` |
+| `AppDelegate` | メニューバーの項目、全域ショートカット ⌃⌥N の登録、起動時のウィンドウ表示、多重起動の転送、`open` や CLI 引数での画像受け取り | `statusItem`、`hotKey`、遅延生成の `PaintController` |
 | `HotKey` | Carbon の `RegisterEventHotKey`（アクセシビリティ権限が要らない）で単一の全域ショートカットを登録する | 登録参照、ハンドラ（static） |
 | `PaintController` と `PaintPanel` | ウィンドウ（非アクティブ型の浮動パネル）と操作部品、キー操作の受付、書き出しの再利用 | 部品、`cachedURL`、位置決め済みか |
 | `CanvasView` | 描画内容と履歴、ポインタ入力、文字入力、画像の貼り付け／ドロップ、描画と PNG 書き出し | `Doc`、取り消し／やり直しの履歴、描画中の要素、移動・入力中の一時状態、ツール・色・太さ・透過 |
@@ -46,7 +46,8 @@ flowchart LR
 - **キー**：メニューバーを持たないアプリなので、標準の「編集」メニューのショートカットは効かない。`PaintPanel.sendEvent` が、Esc・Cmd/Ctrl+Z・Cmd+V を直接処理する。文字入力中は、Esc を入力の取り消し、Cmd+C/X/V/A/Z を文字欄へ転送する（これが無いと文字欄でコピー・貼り付けができない）。
 - **文字入力**：キャンバス上に `NSTextView` を重ね、確定時に `Item` へ変換して取り除く。Return で確定、Shift／Option+Return で改行。パネルがキーを失ったとき、ツールを変えたとき、別の場所をクリックしたとき、書き出し・取り消し・やり直しの前にも確定する。
 - **画像**：クリップボードとドロップは同じ読み取り（`CanvasView.images(from:)`）を通す。ファイル URL があれば画像のものだけを採り、無ければ画像データを採る。ファイル URL があるのに画像でない場合は、ファイルのアイコン画像を拾わないよう、何も採らない。
-- **多重起動**：2 回目の起動は、同じ bundle ID の実行中インスタンスがあれば、`DistributedNotificationCenter` で画像パスを渡して自分は終了する。
+- **起動**：起動時に、ウィンドウを出す（画像を渡されていれば、背景として読み込んでから）。ウィンドウを閉じてもアプリは常駐する。
+- **多重起動**：2 回目の起動は、同じ bundle ID の実行中インスタンスがあれば、`DistributedNotificationCenter` で画像パスを渡して自分は終了する。通知名は bundle ID から決める（本番は `dev.takemo101.shortnote.open`）ので、bundle ID を変えたコピー（検証用）は、実行中の本番インスタンスと互いに影響しない。
 
 ### ウィンドウ
 
