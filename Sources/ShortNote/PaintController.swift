@@ -76,6 +76,7 @@ final class PaintController: NSObject {
         )
         super.init()
         buildUI()
+        applyCanvasPx(Self.savedCanvasPx())  // 画像つきで起動したときも、画像の配置がこの大きさのキャンバスで決まるように、ここで適用する
     }
 
     // MARK: - UI
@@ -230,6 +231,123 @@ final class PaintController: NSObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
             self?.copyButton.title = "パスをコピー"
         }
+    }
+
+    // MARK: - Canvas size
+
+    /// 「キャンバスのサイズ」は、書き出す PNG のピクセル数（= キャンバスのポイント数 × 書き出し倍率 2）。
+    static let minimumCanvasPx = CGSize(
+        width: CanvasView.minimumSize.width * CanvasView.exportScale,
+        height: CanvasView.minimumSize.height * CanvasView.exportScale
+    )
+    static let defaultCanvasPx = minimumCanvasPx
+    static let canvasSizePresets: [(title: String, px: CGSize)] = [
+        ("960 × 640（標準）", CGSize(width: 960, height: 640)),
+        ("1280 × 720（HD）", CGSize(width: 1280, height: 720)),
+        ("1920 × 1080（Full HD）", CGSize(width: 1920, height: 1080)),
+        ("1080 × 1080（正方形）", CGSize(width: 1080, height: 1080)),
+        ("1024 × 768（4:3）", CGSize(width: 1024, height: 768)),
+    ]
+    private static let widthKey = "canvasWidthPx"
+    private static let heightKey = "canvasHeightPx"
+
+    /// 保存してあるキャンバスのサイズ。無い・不正（最小未満）なら標準。
+    static func savedCanvasPx() -> CGSize {
+        let d = UserDefaults.standard
+        let w = CGFloat(d.integer(forKey: widthKey)), h = CGFloat(d.integer(forKey: heightKey))
+        guard w >= minimumCanvasPx.width, h >= minimumCanvasPx.height else { return defaultCanvasPx }
+        return CGSize(width: w, height: h)
+    }
+
+    private static func saveCanvasPx(_ px: CGSize) {
+        let d = UserDefaults.standard
+        d.set(Int(px.width.rounded()), forKey: widthKey)
+        d.set(Int(px.height.rounded()), forKey: heightKey)
+    }
+
+    /// 保存してあるサイズ（メニューのチェック表示用）。
+    var savedCanvasPx: CGSize { Self.savedCanvasPx() }
+
+    private var targetScreenFrame: CGRect { (panel.screen ?? NSScreen.main)?.visibleFrame ?? .zero }
+
+    /// この画面に収まる最大のキャンバス（px）。ウィンドウの枠（ツールバーなど）を差し引いて求める。
+    func maxCanvasPx() -> CGSize {
+        panel.contentView?.layoutSubtreeIfNeeded()
+        let frame = targetScreenFrame
+        let chromeW = panel.frame.width - canvas.bounds.width, chromeH = panel.frame.height - canvas.bounds.height
+        return CGSize(
+            width: floor((frame.width - chromeW) * CanvasView.exportScale),
+            height: floor((frame.height - chromeH) * CanvasView.exportScale)
+        )
+    }
+
+    /// ウィンドウを、キャンバスがちょうど `px` になる大きさにする（左上を動かさず、画面からはみ出す分は寄せる）。
+    /// 最小未満、またはこの画面に収まらないときは何もせず false。
+    @discardableResult
+    private func applyCanvasPx(_ px: CGSize) -> Bool {
+        let maxPx = maxCanvasPx()
+        guard px.width >= Self.minimumCanvasPx.width, px.height >= Self.minimumCanvasPx.height,
+              px.width <= maxPx.width, px.height <= maxPx.height else { return false }
+        let target = CGSize(width: px.width / CanvasView.exportScale, height: px.height / CanvasView.exportScale)
+        let cur = canvas.bounds.size
+        let old = panel.frame
+        let size = CGSize(width: old.width + target.width - cur.width, height: old.height + target.height - cur.height)
+        let screen = targetScreenFrame
+        var origin = CGPoint(x: old.minX, y: old.maxY - size.height)
+        origin.x = min(max(origin.x, screen.minX), screen.maxX - size.width)
+        origin.y = min(max(origin.y, screen.minY), screen.maxY - size.height)
+        panel.setFrame(NSRect(origin: origin, size: size), display: true, animate: false)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        return true
+    }
+
+    /// キャンバスのサイズを設定する。適用でき次第、次回の起動のために保存する。収まらないときは理由を知らせる。
+    @discardableResult
+    func setCanvasSize(px: CGSize) -> Bool {
+        if applyCanvasPx(px) {
+            Self.saveCanvasPx(px)
+            cachedURL = nil
+            return true
+        }
+        let maxPx = maxCanvasPx()
+        let alert = NSAlert()
+        alert.messageText = "このサイズにはできません"
+        alert.informativeText = "キャンバスは 最小 \(Int(Self.minimumCanvasPx.width)) × \(Int(Self.minimumCanvasPx.height)) から、この画面では 最大 \(Int(maxPx.width)) × \(Int(maxPx.height)) ピクセルまでです。"
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+        return false
+    }
+
+    /// 数値でキャンバスのサイズを入力する。
+    func promptCanvasSize() {
+        let current = savedCanvasPx
+        let maxPx = maxCanvasPx()
+        let widthField = NSTextField(string: "\(Int(current.width))")
+        let heightField = NSTextField(string: "\(Int(current.height))")
+        for f in [widthField, heightField] {
+            f.alignment = .right
+            f.setAccessibilityLabel(f === widthField ? "幅" : "高さ")
+            f.widthAnchor.constraint(equalToConstant: 70).isActive = true
+        }
+        let row = NSStackView(views: [widthField, NSTextField(labelWithString: "×"), heightField, NSTextField(labelWithString: "ピクセル")])
+        row.orientation = .horizontal
+        row.spacing = 6
+        row.frame = NSRect(x: 0, y: 0, width: 260, height: 24)
+
+        let alert = NSAlert()
+        alert.messageText = "キャンバスのサイズ"
+        alert.informativeText = "書き出す画像のピクセル数です（最小 \(Int(Self.minimumCanvasPx.width)) × \(Int(Self.minimumCanvasPx.height))、この画面では最大 \(Int(maxPx.width)) × \(Int(maxPx.height))）。次回の起動でも使います。"
+        alert.accessoryView = row
+        alert.addButton(withTitle: "設定")
+        alert.addButton(withTitle: "キャンセル")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        guard let w = Int(widthField.stringValue.trimmingCharacters(in: .whitespaces)),
+              let h = Int(heightField.stringValue.trimmingCharacters(in: .whitespaces)) else {
+            NSSound.beep()
+            return
+        }
+        setCanvasSize(px: CGSize(width: w, height: h))
     }
 
     // MARK: - Public

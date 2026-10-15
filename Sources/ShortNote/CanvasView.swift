@@ -501,26 +501,16 @@ final class CanvasView: NSView {
 
     // MARK: - Export
 
-    private func pixelWidth(_ image: NSImage) -> CGFloat {
-        let px = image.representations.map { CGFloat($0.pixelsWide) }.max() ?? 0
-        return px > 0 ? px : image.size.width
-    }
+    /// 書き出しの倍率。ピクセル数 = キャンバスのポイント数 × 2（Retina 相当）に固定し、出力サイズを予測できるようにする。
+    static let exportScale: CGFloat = 2
 
     /// 現在のキャンバス全体を PNG にする。背景透過オンなら白地を敷かず、アルファ付きにする。
-    /// 画像が入っているときは元解像度を保つよう、最大 4 倍まで書き出し倍率を上げる。
-    /// 長辺が `maxExportSide` を超えないように倍率を下げる。
+    /// ピクセル数はキャンバスの 2 倍。長辺が `maxExportSide` を超える巨大なキャンバスでだけ、倍率を下げる。
     func renderPNG() -> Data? {
         commitEditing()
-        var required: CGFloat = 2
-        if let image = doc.background, doc.backgroundRect.width > 0 {
-            required = max(required, pixelWidth(image) / doc.backgroundRect.width)
-        }
-        for item in doc.items where item.kind == .image {
-            if let image = item.image, item.rect.width > 0 { required = max(required, pixelWidth(image) / item.rect.width) }
-        }
-        var scale = min(required, 4)
+        var scale = Self.exportScale
         let longest = max(bounds.width, bounds.height)
-        if longest > 0 { scale = min(scale, max(1, Self.maxExportSide / longest)) }
+        if longest > 0 { scale = min(scale, Self.maxExportSide / longest) }
 
         let size = bounds.size
         guard size.width > 0, size.height > 0, let rep = NSBitmapImageRep(
