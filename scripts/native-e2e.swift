@@ -1,5 +1,6 @@
 import AppKit
 import ApplicationServices
+import Carbon.HIToolbox
 
 // ShortNote native E2E（verifying-macos-apps 準拠）。自分で起動した PID だけを操作する。
 // 使い方（リポジトリのルートで）:
@@ -649,6 +650,23 @@ func closeShortcutsAndShowPanel() {
     _ = wait(2) { shortcutsWin() == nil }
     _ = pressMenu("ShortNote を開く"); _ = wait(3) { candWindow(pid) != nil }
 }
+/// いまのキーボード配列で、修飾キーなしで文字 `ch` を出す物理キーのキーコード。アプリの既定のキーとは別に、ハーネスが求める（アプリの解決を、そのまま信じない）。
+func keyCodeProducing(_ ch: String) -> CGKeyCode? {
+    guard let src = TISCopyCurrentASCIICapableKeyboardLayoutInputSource()?.takeRetainedValue(),
+          let prop = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+    let data = Unmanaged<CFData>.fromOpaque(prop).takeUnretainedValue()
+    guard let bytes = CFDataGetBytePtr(data) else { return nil }
+    let type = UInt32(CGEventSource(stateID: .hidSystemState)?.keyboardType ?? 0)
+    return withExtendedLifetime((src, data)) {
+        for code in CGKeyCode(0)..<128 {
+            var dead: UInt32 = 0, len = 0
+            var chars = [UniChar](repeating: 0, count: 4)
+            let st = bytes.withMemoryRebound(to: UCKeyboardLayout.self, capacity: 1) { UCKeyTranslate($0, code, UInt16(kUCKeyActionDown), 0, type, OptionBits(1 << kUCKeyTranslateNoDeadKeysBit), &dead, 4, &len, &chars) }
+            if st == noErr, len > 0, String(utf16CodeUnits: chars, count: len) == ch { return code }
+        }
+        return nil
+    }
+}
 if let why = keyGuard(pid, app) {
     for id in ["K1 keys 1-5 select tools", "K2 [ ] change brush size", "K3 copy-path key", "K4-K9 reassigning shortcuts"] { rec(id, "blocked", "keyboard guard: \(why)") }
 } else {
@@ -657,15 +675,17 @@ if let why = keyGuard(pid, app) {
     for (code, _) in toolKeys { key(code, []); seen.append(radioSelected()) }
     rec("K1 default keys 1-5 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1 the selected segment was \(seen) (expect [2, 3, 4, 1, 0])")
 
-    let v0 = sliderValue(); key(30, []); let v1 = sliderValue(); key(33, []); let v2 = sliderValue()
-    if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 40 as CFNumber) }
-    key(30, []); let vMax = sliderValue()
-    if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 1 as CFNumber) }
-    key(33, []); let vMin = sliderValue()
-    if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 4 as CFNumber) }
-    rec("K2 ] / [ change the brush size by 2 and stop at the ends (the slider follows)",
-        (v0 != nil && v1 == v0.map { $0 + 2 } && v2 == v0 && vMax == 40 && vMin == 1) ? "pass" : "fail",
-        "start \(String(describing: v0)) -> ] \(String(describing: v1)) -> [ \(String(describing: v2)); at 40 ] -> \(String(describing: vMax)); at 1 [ -> \(String(describing: vMin))")
+    if let smallerKey = keyCodeProducing("["), let largerKey = keyCodeProducing("]") {
+        let v0 = sliderValue(); key(largerKey, []); let v1 = sliderValue(); key(smallerKey, []); let v2 = sliderValue()
+        if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 40 as CFNumber) }
+        key(largerKey, []); let vMax = sliderValue()
+        if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 1 as CFNumber) }
+        key(smallerKey, []); let vMin = sliderValue()
+        if let sl = sliders.first { _ = AXUIElementSetAttributeValue(sl, "AXValue" as CFString, 4 as CFNumber) }
+        rec("K2 ] / [ change the brush size by 2 and stop at the ends (the slider follows)",
+            (v0 != nil && v1 == v0.map { $0 + 2 } && v2 == v0 && vMax == 40 && vMin == 1) ? "pass" : "fail",
+            "keys: [=\(smallerKey) ]=\(largerKey); start \(String(describing: v0)) -> ] \(String(describing: v1)) -> [ \(String(describing: v2)); at 40 ] -> \(String(describing: vMax)); at 1 [ -> \(String(describing: vMin))")
+    } else { rec("K2 ] / [ change the brush size", "blocked", "the current keyboard layout has no unmodified '[' / ']' key to press") }
 
     NSPasteboard.general.clearContents(); NSPasteboard.general.setString("SNV-SENTINEL", forType: .string)
     key(8, [.maskCommand, .maskShift])
@@ -722,7 +742,7 @@ if let why = keyGuard(pid, app) {
                 let pressedReset = scPress("reset-toolPen")
                 usleep(300_000)
                 let m = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
-                let refused = m.contains("ツール: 円") && scText("keys-toolPen") == "P" && scText("keys-toolEllipse") == "1"
+                let refused = m.contains("すでに使っているキー") && m.contains("ツール: 円") && scText("keys-toolPen") == "P" && scText("keys-toolEllipse") == "1"
                 rec("K10 'reset' is refused while another command holds the default key, and nothing changes", (moved && pressedReset && refused) ? "pass" : "fail",
                     "ellipse took 1=\(moved) reset pressed=\(pressedReset) message='\(m)' pen now=\(scText("keys-toolPen")) ellipse now=\(scText("keys-toolEllipse"))")
             } else { rec("K10 reset conflict", "blocked", "could not start recording") }

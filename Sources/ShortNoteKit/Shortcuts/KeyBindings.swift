@@ -15,12 +15,17 @@ struct KeyBindings: Equatable {
 
     /// 現在のキーボード配列に合わせた既定。`[` `]` は、配列によって物理キーの位置が違う（JIS では別のキー）ので、
     /// `characterForKeyCode`（現在の配列で、修飾キーなしの物理キーが出す文字）から、その文字を出すキーを探す。
-    /// 見つからないときは US 配列の位置にする。他のキー（数字・英字・Esc）は、配列が違っても同じ位置にある。
+    /// 次のどれかのときは、US 配列の位置（`defaults`）にする：どちらかが見つからない、同じキーになる、
+    /// 他の既定や予約済みのキーと重なる（`[` が数字の段にある配列など）。他のキー（数字・英字・Esc）は、配列が違っても同じ位置にある。
     static func standardDefaults(characterForKeyCode: (UInt16) -> String?) -> [Command: [KeyChord]] {
-        func keyCode(of character: String, fallback: UInt16) -> UInt16 {
-            (UInt16(0)..<128).first { characterForKeyCode($0) == character } ?? fallback
+        func keyCode(of character: String) -> UInt16? {
+            (UInt16(0)..<128).first { characterForKeyCode($0) == character }
         }
-        return standardDefaults(bracketKeyCodes: (smaller: keyCode(of: "[", fallback: 33), larger: keyCode(of: "]", fallback: 30)))
+        guard let smaller = keyCode(of: "["), let larger = keyCode(of: "]") else { return defaults }
+        let resolved = standardDefaults(bracketKeyCodes: (smaller: smaller, larger: larger))
+        let all = resolved.values.flatMap { $0 }
+        let consistent = Set(all).count == all.count && !all.contains { reservedChords.contains($0) }
+        return consistent ? resolved : defaults
     }
 
     private static func standardDefaults(bracketKeyCodes: (smaller: UInt16, larger: UInt16)) -> [Command: [KeyChord]] {

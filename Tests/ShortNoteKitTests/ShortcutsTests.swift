@@ -304,12 +304,43 @@ private func hasConflict(_ b: KeyBindings) -> Bool {
         #expect(loaded.bindings.chords(for: .brushLarger) == [chord(42, "]")])
     }
 
+    @MainActor
     @Test func theDefaultsOfTheRealLayoutNeverCollideOrUseReservedKeys() {
-        // この Mac の、いまの配列で解決した既定。どの配列でも、既定どうしが重ならず、予約済みのキーも使わない。
-        let b = KeyBindings(defaultChords: KeyBindings.standardDefaults(characterForKeyCode: KeyboardLayout.character(forKeyCode:)))
+        // この Mac の、いまの配列（TIS はメインスレッドで使う）。どの配列でも、既定どうしが重ならず、予約済みのキーも使わない。
+        let table = KeyboardLayout.characters()
+        let b = KeyBindings(defaultChords: KeyBindings.standardDefaults(characterForKeyCode: { table[$0] }))
         #expect(!hasConflict(b))
         for command in Command.allCases {
             for c in b.chords(for: command) { #expect(!KeyBindings.reservedChords.contains(c)) }
         }
+    }
+
+    @Test func bracketKeysThatCollideWithOtherDefaultsFallBackToTheUSPositions() {
+        // `[` が数字の段（「2」のキー = 19）にある配列（Programmer Dvorak など）。円のキーと重なるので、US の位置にする。
+        let programmerDvorak: [UInt16: String] = [19: "[", 30: "]"]
+        #expect(KeyBindings.standardDefaults(characterForKeyCode: { programmerDvorak[$0] }) == KeyBindings.defaults)
+        // 片方（`]`）しか見つからない配列。見つかった方だけを使うと、もう片方の既定の位置と重なりうるので、両方を US の位置にする。
+        let onlyOne: [UInt16: String] = [30: "["]
+        #expect(KeyBindings.standardDefaults(characterForKeyCode: { onlyOne[$0] }) == KeyBindings.defaults)
+    }
+
+    @Test func aSavedKeyWinsOverALayoutDerivedDefaultWhenTheKeyboardTypeChanges() throws {
+        // US の配列で、文字ツールに 42（US の `\`）を保存した。あとで JIS のキーボードをつなぐと、ブラシ太くの既定が 42 になる。
+        let name = "ShortNoteTests.\(UUID().uuidString)"
+        let ud = try #require(UserDefaults(suiteName: name)); defer { ud.removePersistentDomain(forName: name) }
+        let backslash = chord(42, "\\")
+        KeyBindingsStore(defaults: ud).save(try KeyBindings().assigning(backslash, to: .toolText).get())
+
+        let jis = KeyBindings.standardDefaults(characterForKeyCode: { self.jis[$0] })
+        let loaded = KeyBindingsStore(defaults: ud, defaultChords: jis).load()
+        #expect(loaded.bindings.chords(for: .toolText) == [backslash])         // 利用者が選んだキーは残る
+        #expect(loaded.bindings.chords(for: .brushLarger).isEmpty)              // 配列由来の既定の側が、割り当てなしになる
+        #expect(loaded.bindings.chords(for: .brushSmaller) == [chord(30, "[")])
+        #expect(!hasConflict(loaded.bindings))
+        #expect(loaded.issue?.contains("ブラシを太く") == true)                  // 理由を知らせる
+        // 保存し直しても、利用者の選択は変わらない。US に戻すと、ブラシ太くの既定（30）は「初期値」で戻せる。
+        let store = KeyBindingsStore(defaults: ud, defaultChords: jis)
+        store.save(loaded.bindings)
+        #expect(store.load().bindings.chords(for: .toolText) == [backslash])
     }
 }

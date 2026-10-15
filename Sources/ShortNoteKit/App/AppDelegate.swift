@@ -8,7 +8,10 @@ private let openNotification = Notification.Name("\(Bundle.main.bundleIdentifier
 final class AppDelegate: NSObject, NSApplicationDelegate {
     // `[` `]` の既定は、いまのキーボード配列（US・JIS など）で、その文字を出すキーにする。
     private let shortcuts = ShortcutCenter(store: KeyBindingsStore(
-        defaultChords: KeyBindings.standardDefaults(characterForKeyCode: KeyboardLayout.character(forKeyCode:))
+        defaultChords: {
+            let table = KeyboardLayout.characters()   // 配列は 1 度だけ引く
+            return KeyBindings.standardDefaults(characterForKeyCode: { table[$0] })
+        }()
     ))
     // `open` 経由の起動では application(_:open:) が didFinishLaunching より先に来るため lazy。
     private lazy var controller = PaintWindowController(center: shortcuts)
