@@ -68,9 +68,9 @@ struct LineToolTests {
         #expect(Command.toolLine.group == .tool)
     }
 
-    @Test("ツールバーの番号（Tool の rawValue）は、直線が末尾の 5。既存の 0〜4 は動かない")
+    @Test("ツールバーの並びは、ペン／直線／円／四角／文字／移動。直線はペンの隣（2 番目）")
     func toolSegmentOrder() {
-        #expect(Tool.allCases == [.pen, .ellipse, .rect, .text, .move, .line])
-        #expect(Tool.line.rawValue == 5)
+        #expect(Tool.allCases == [.pen, .line, .ellipse, .rect, .text, .move])
+        #expect(Tool.line.rawValue == 1)
     }
 }
