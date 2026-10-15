@@ -126,4 +126,15 @@ Git の書込みは `but` を使う。統合先は `main`、GitButler target は
 
 - `./scripts/dmg.sh` が `build/ShortNote.dmg`（`ShortNote.app` と `/Applications` へのショートカット入り）を作る。既定は ad-hoc 署名。`build/` は Git 対象外。
 - Developer ID 署名・公証は、`SIGN_IDENTITY`／`NOTARY_PROFILE` を渡したときだけ走る。**この経路は証明書が無いため一度も実行しておらず、動作は未確認**。実施の可否は SPEC の [配布前提](../SPEC.md#10-配布前提) とユーザーの判断に従う。
-- GitHub Releases への公開や CI は、現時点で持たない。追加する場合は、権限・署名の扱い・成果物の検査を明示してから導入する。
+- GitHub Releases への公開は、次の「リリースの手順」で行う（SPEC の [GitHub Releases での配布](../SPEC.md#101-github-releases-での配布)）。
+
+### リリースの手順
+
+`.github/workflows/release.yml` が、タグ `vX.Y.Z` の push で、DMG をビルドして GitHub Release に添付する。**リリースの公開は、ユーザーの依頼で行う。依頼なしにタグを打たない。**
+
+1. 公開したい commit が `main` に入っていること（`main` に含まれない commit のタグでは、Release を作らない）。版は、アプリの `CFBundleShortVersionString` と `CFBundleVersion` に、タグの `X.Y.Z` が入る（`VERSION` を `build.sh` に渡す）。
+2. **ユーザーが、自分の端末で**、タグを作って push する：`git tag vX.Y.Z <main の commit> && git push origin vX.Y.Z`。Git の書込みは `but` を使う規約だが、`but` にはタグの操作がない（確認済み）。エージェントは、規約により raw Git で書き込まないので、タグを打たない。
+3. ワークフローが、単体テスト → `VERSION=X.Y.Z ./scripts/dmg.sh` → `./scripts/verify-dmg.sh`（整合・中身・アイコン・版・Universal・署名）→ `ShortNote-X.Y.Z.dmg` と `.sha256` の作成、の順に進み、通ったときだけ Release を作る。Release のノートには、インストールと Gatekeeper の回避手順を付け、変更点は GitHub が生成する。
+4. タグを打たずに確かめたいときは、Actions タブ → release → Run workflow（`workflow_dispatch`。ワークフローが `main` に入ってから使える。タグを選んで起動しても、Release は作らない）。DMG をアーティファクト（14 日）に残す。リリースに関わるファイル（ワークフロー、ビルド・DMG・検査・テストのスクリプト、`Package.swift`、`Resources/`）を変える Pull Request でも、同じドライランが自動で走る（マージ前に、ワークフロー自体を検証できる）。
+
+署名は ad-hoc のまま。署名・公証の鍵や認証情報を、ワークフローに渡さない。ローカルで同じ検査をするには、`VERSION=X.Y.Z ./scripts/dmg.sh && ./scripts/verify-dmg.sh build/ShortNote.dmg X.Y.Z`。

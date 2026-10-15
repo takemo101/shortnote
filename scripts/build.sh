@@ -11,6 +11,12 @@ mkdir -p "$APP/Contents/MacOS"
 BIN="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
 cp "$BIN/ShortNote" "$APP/Contents/MacOS/ShortNote"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
+# VERSION=X.Y.Z を渡すと、アプリの版にする（リリースのワークフローが、タグから渡す）。未指定なら、Info.plist のまま。署名の前に書き換える。
+if [ -n "${VERSION:-}" ]; then
+    [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "build.sh: VERSION は X.Y.Z の形で指定してください: $VERSION" >&2; exit 1; }
+    plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+    plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
+fi
 # アイコン（scripts/make-icon.sh で生成してコミットしたもの）。MenuBarIcon.png は、メニューバーの項目が実行時に読む。
 mkdir -p "$APP/Contents/Resources"
 cp Resources/AppIcon.icns Resources/MenuBarIcon.png "$APP/Contents/Resources/"
