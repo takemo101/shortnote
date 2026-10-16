@@ -3,7 +3,10 @@ import Foundation
 /// エージェントからの操作の CLI（SPEC §3.7）。実行ファイルの最初の引数がサブコマンドのときに動く。
 enum AgentCLI {
     /// いま実装しているサブコマンド。ここに無い名前は、これまでどおり、画像のパスとして扱う（アプリとして起動する）。
-    static let subcommands = Set(["render"]).union(LiveCommand.names)
+    /// `--help`・`-h`・`help`、`--version`・`-V`・`version` も、CLI として動く（アプリを起動しない）。
+    static let helpNames: Set<String> = ["--help", "-h", "help"]
+    static let versionNames: Set<String> = ["--version", "-V", "version"]
+    static let subcommands = Set(["render"]).union(LiveCommand.names).union(helpNames).union(versionNames)
 
     static func handles(_ firstArgument: String) -> Bool { subcommands.contains(firstArgument) }
 
@@ -13,9 +16,27 @@ enum AgentCLI {
         _ args: [String],
         readStdin: () -> Data = { FileHandle.standardInput.readDataToEndOfFile() },
         socketPath: String = AgentSocket.path(bundleID: AppLocation.bundleIdentifier),
-        launch: @escaping () -> Bool = AgentClient.launchApp
+        launch: @escaping () -> Bool = AgentClient.launchApp,
+        output: (String) -> Void = { print($0) },
+        versionText: String = HelpText.currentVersion
     ) -> Int32 {
         guard let command = args.first else { return fail(.usage("サブコマンドがありません")) }
+        if helpNames.contains(command) {
+            let rest = Array(args.dropFirst())
+            guard rest.count <= 1 else { return fail(.usage("使い方：help [コマンド]")) }
+            guard let text = HelpText.text(for: rest.first) else { return fail(.usage("知らないコマンドです：\(rest[0])（render・draw・get・export・clear）")) }
+            output(text)
+            return 0
+        }
+        if versionNames.contains(command) {
+            guard args.count == 1 else { return fail(.usage("使い方：version")) }
+            output(versionText)
+            return 0
+        }
+        if args.dropFirst().contains(where: { $0 == "--help" || $0 == "-h" }), let text = HelpText.commands[command] {
+            output(text)   // `render --help` など
+            return 0
+        }
         switch command {
         case "render":
             switch RenderCommand.parse(Array(args.dropFirst())) {
@@ -23,8 +44,8 @@ enum AgentCLI {
             case .success(let parsed):
                 switch RenderCommand.run(parsed, readStdin: readStdin) {
                 case .failure(let error): return fail(error)
-                case .success(let output):
-                    print(AgentJSON.line(output))
+                case .success(let result):
+                    output(AgentJSON.line(result))
                     return 0
                 }
             }
@@ -35,7 +56,7 @@ enum AgentCLI {
                 switch AgentClient.send(request.line, socketPath: socketPath, launch: request.launchesApp ? launch : nil) {
                 case .failure(let error): return fail(error)
                 case .success(let reply):
-                    print(reply)
+                    output(reply)
                     return 0
                 }
             }
