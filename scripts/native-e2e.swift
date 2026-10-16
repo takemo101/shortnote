@@ -1001,8 +1001,8 @@ if let why = keyGuard(pid, app) {
 
 // ---- CLI の render（A20・A21）：実際の実行ファイルで、アプリを起動せずに PNG を書く。常駐中のアプリ（この実行の候補）が動いていても、転送されずに動く ----
 /// 実行ファイルを、引数と標準入力つきで実行して、(終了コード, 標準出力, 標準エラー) を返す。
-func runCLI(_ args: [String], stdin: String? = nil) -> (Int32, String, String) {
-    let p = Process(); p.executableURL = URL(fileURLWithPath: buildExe); p.arguments = args
+func runCLI(_ args: [String], stdin: String? = nil, exe: String = buildExe) -> (Int32, String, String) {
+    let p = Process(); p.executableURL = URL(fileURLWithPath: exe); p.arguments = args
     let out = Pipe(), err = Pipe(), inp = Pipe()
     p.standardOutput = out; p.standardError = err; p.standardInput = inp
     guard (try? p.run()) != nil else { return (-1, "", "could not run") }
@@ -1083,6 +1083,9 @@ let agentIds = [
     "G10 draw launches the app when it is not running (without taking focus), and a stale socket from a killed app is replaced",
     "G11 a request that cannot reach the app exits 3 (unreachable); an invalid or oversized request exits 1 without touching the canvas",
     "G12 a normal quit (terminate, not SIGTERM) ends the app within 5 s and removes its socket file",
+    "G13 draw through a symlink to the executable (how `snote` is installed) launches the app, draws, and get reaches it",
+    "G14 the menu-bar menu has the snote command item (install / uninstall / explanation)",
+    "G15 launching through the symlink with no arguments becomes the real app (same bundle id, panel shown), not a second broken instance",
 ]
 var G11state: (Int32, Int32, Int?, Int?, Int, [String: Any]?)? = nil
 if agentSocketPath.utf8.count > 103 {
@@ -1309,6 +1312,47 @@ if proc.isRunning {
             kill(lp, SIGTERM); _ = wait(3) { NSRunningApplication(processIdentifier: lp) == nil || NSRunningApplication(processIdentifier: lp)?.isTerminated == true }
         }
     } else { rec(agentIds[9], "blocked", "no other frontmost app recorded, or the socket path is too long") }
+    // G13・G14：リンク経由（`snote` と同じ形：実行ファイルへのシンボリックリンク）。アプリが動いていない状態から、draw が起動して届く
+    if agentSocketPath.utf8.count <= 103 {
+        _ = wait(5) { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty }
+        let none13 = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+        let link = "\(work)/snote"
+        try? FileManager.default.removeItem(atPath: link)
+        try? FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: buildExe)
+        let d13 = runCLI(["draw", "-"], stdin: ##"{"version":1,"ops":[{"op":"rect","x":20,"y":20,"w":60,"h":40,"color":"#ff0000"}]}"##, exe: link)
+        let app13 = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
+        let g13 = runCLI(["get"], exe: link)
+        let items13 = (jsonObj(g13.1)?["items"] as? [Any])?.count
+        rec(agentIds[12], (none13 && d13.0 == 0 && jsonObj(d13.1)?["added"] as? Int == 1 && app13 != nil && g13.0 == 0 && items13 == 1) ? "pass" : "fail",
+            "no instance before=\(none13); draw via the symlink exit=\(d13.0) stdout=\(d13.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(d13.2.prefix(200))'; launched=\(app13 != nil); get via the symlink exit=\(g13.0) items=\(String(describing: items13))")
+        if let a = app13, a.bundleURL?.path == appBundlePath {
+            let el = AXUIElementCreateApplication(a.processIdentifier)
+            var titles: [(String, Bool)] = []
+            _ = wait(5) {
+                guard let bar = (ax(el, "AXExtrasMenuBar") ?? ax(el, "AXMenuBar")).map({ $0 as! AXUIElement }) else { return false }
+                titles = collect(bar) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle").hasPrefix("コマンド「snote」") }.map { (axs($0, "AXTitle"), (ax($0, "AXEnabled") as? NSNumber)?.boolValue ?? false) }
+                return !titles.isEmpty
+            }
+            rec(agentIds[13], titles.count == 1 ? "pass" : "fail", "menu items starting with the snote command label: \(titles.map { "'\($0.0)' enabled=\($0.1)" }) (installing is not pressed: it asks for an administrator password)")
+            a.terminate(); _ = wait(5) { NSRunningApplication(processIdentifier: a.processIdentifier)?.isTerminated ?? true }
+        } else {
+            rec(agentIds[13], "blocked", "the relaunched candidate was not found, or is not this build's bundle")
+            if let a = app13 { a.terminate(); _ = wait(5) { NSRunningApplication(processIdentifier: a.processIdentifier)?.isTerminated ?? true } }   // 自分が起動した候補は、見つかった限り、終わらせる
+        }
+        // G15：引数なしで、リンク経由で起動する。リンクを辿って、本物の実行ファイルに置き換わる（バンドル ID が候補のもの。パネルが出る）
+        _ = wait(5) { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty }
+        let p15 = Process(); p15.executableURL = URL(fileURLWithPath: link)
+        p15.standardOutput = FileHandle(forWritingAtPath: "/dev/null"); p15.standardError = FileHandle(forWritingAtPath: "/dev/null")
+        if (try? p15.run()) != nil {
+            let pid15 = p15.processIdentifier
+            let sameId = wait(6) { NSRunningApplication(processIdentifier: pid15)?.bundleIdentifier == bundleId }
+            let shown15 = wait(6) { candWindow(pid15) != nil }
+            rec(agentIds[14], (sameId && shown15) ? "pass" : "fail", "process \(pid15) started through the symlink: bundle id == candidate's: \(sameId); its 'ShortNote' panel on screen: \(shown15)")
+            NSRunningApplication(processIdentifier: pid15)?.terminate()
+            if !wait(5, { !p15.isRunning }) { kill(pid15, SIGTERM) }   // 自分が起動した pid だけ
+        } else { rec(agentIds[14], "blocked", "could not start the symlink") }
+        try? FileManager.default.removeItem(atPath: link)
+    }
     if let s = G11state {
         // G11：届かない（終了コード 3、上の G10a の前）と、不正・大きすぎる要求（終了コード 1、キャンバスは変わらない）
         rec(agentIds[10], (unreachable.0 == 3 && s.0 == 1 && s.1 == 1 && s.2 == s.3 && s.2 != nil && s.4 > 1 << 20 && s.5?["code"] as? String == "invalid_ops" && s.5?["op"] as? Int == 1) ? "pass" : "fail",

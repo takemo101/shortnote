@@ -12,7 +12,7 @@ enum AgentCLI {
     static func run(
         _ args: [String],
         readStdin: () -> Data = { FileHandle.standardInput.readDataToEndOfFile() },
-        socketPath: String = AgentSocket.path(bundleID: Bundle.main.bundleIdentifier),
+        socketPath: String = AgentSocket.path(bundleID: AppLocation.bundleIdentifier),
         launch: @escaping () -> Bool = AgentClient.launchApp
     ) -> Int32 {
         guard let command = args.first else { return fail(.usage("サブコマンドがありません")) }

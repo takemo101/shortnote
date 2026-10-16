@@ -70,14 +70,13 @@ enum AgentClient {
         return line.isEmpty ? nil : String(decoding: line, as: UTF8.self)
     }
 
-    /// アプリを、フォーカスを奪わずに起動する（実行ファイルが `ShortNote.app` の中にあるとき）。
+    /// アプリを、フォーカスを奪わずに起動する（実行ファイルが `ShortNote.app` の中にあるとき。`snote` のようなシンボリックリンク経由でも、リンクを辿って、アプリを見つける）。
     /// すでに同じバンドル ID のアプリが動いている（起動の途中かもしれない）ときは、起動し直さず、`true` を返す（呼び出し側が、受け口を待つ）。
     /// `open` は、動いているアプリに再び開く要求を送り、前面にしうる。
     static func launchApp() -> Bool {
-        if let id = Bundle.main.bundleIdentifier,
+        if let id = AppLocation.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: id).contains(where: { $0.processIdentifier != getpid() }) { return true }
-        let bundle = Bundle.main.bundleURL
-        guard bundle.pathExtension == "app" else { return false }
+        guard let bundle = AppLocation.bundleURL else { return false }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         process.arguments = ["-g", bundle.path, "--args", AppLaunch.noActivateFlag]
