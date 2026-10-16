@@ -1,7 +1,7 @@
 import CoreGraphics
 
 /// ペンの 1 点。筆圧は、タブレットのときだけ 1 未満になる。
-struct StrokePoint {
+struct StrokePoint: Equatable {
     var point: CGPoint
     var pressure: CGFloat
 }
@@ -30,9 +30,23 @@ struct Item {
     var size: CGFloat
     /// 円・四角で、枠の内側を、色で塗りつぶすか。ほかの要素では使わない（`false`）。
     var filled = false
+    /// 回転角（ラジアン。時計回りが正。`(-π, π]`）。枠の中心が軸。円・四角・画像・文字だけが持つ（ペン・直線は、点そのものを回すので、常に 0）。
+    var rotation: CGFloat = 0
 
-    /// 要素を囲む範囲（移動ツールが掴める範囲）。線の太さの分だけ外側まで含める。
+    /// 要素を囲む範囲（移動ツールが掴める範囲）。線の太さの分だけ外側まで含める。回転しているときは、回したあとの外接する範囲（軸に平行な最小の四角）。
     var bounds: CGRect {
+        let base = unrotatedBounds
+        guard rotation != 0 else { return base }
+        let center = CGPoint(x: base.midX, y: base.midY)
+        let corners = [CGPoint(x: base.minX, y: base.minY), CGPoint(x: base.maxX, y: base.minY),
+                       CGPoint(x: base.minX, y: base.maxY), CGPoint(x: base.maxX, y: base.maxY)]
+            .map { ItemHandles.rotate($0, about: center, by: rotation) }
+        let xs = corners.map(\.x), ys = corners.map(\.y)
+        return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!)
+    }
+
+    /// 回転する前の `bounds`（描くときに、回した座標系の中で使う）。
+    var unrotatedBounds: CGRect {
         switch content {
         case .line(let a, let b):
             return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y)).insetBy(dx: -size / 2, dy: -size / 2)
@@ -69,5 +83,18 @@ struct Item {
             item.content = .image(image, box: box.offsetBy(dx: d.width, dy: d.height))
         }
         return item
+    }
+
+    /// 形と回転角が同じか（移動・大きさの変更・回転で、変わったかの判定に使う。180° の回転のように、外接する範囲が変わらない変更も見分ける）。
+    func hasSameGeometry(as other: Item) -> Bool {
+        guard rotation == other.rotation, size == other.size else { return false }
+        switch (content, other.content) {
+        case (.pen(let a), .pen(let b)): return a == b
+        case (.line(let a1, let a2), .line(let b1, let b2)): return a1 == b1 && a2 == b2
+        case (.ellipse(let a), .ellipse(let b)), (.rect(let a), .rect(let b)): return a == b
+        case (.text(let s, let a), .text(let t, let b)): return s == t && a == b
+        case (.image(_, let a), .image(_, let b)): return a == b
+        default: return false
+        }
     }
 }

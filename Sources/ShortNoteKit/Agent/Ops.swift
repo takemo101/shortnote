@@ -26,10 +26,10 @@ struct RGBA: Equatable {
 enum Op: Equatable {
     case pen(points: [CGPoint], color: RGBA, size: CGFloat)
     case line(from: CGPoint, to: CGPoint, color: RGBA, size: CGFloat)
-    case ellipse(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false)
-    case rect(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false)
-    case text(String, at: CGPoint, color: RGBA, fontSize: CGFloat)
-    case image(path: String, at: CGPoint, width: CGFloat?, height: CGFloat?)
+    case ellipse(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
+    case rect(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
+    case text(String, at: CGPoint, color: RGBA, fontSize: CGFloat, rotate: Double = 0)
+    case image(path: String, at: CGPoint, width: CGFloat?, height: CGFloat?, rotate: Double = 0)
 }
 
 /// 操作の JSON を、検証して `[Op]` にする。検証はここだけで行い、受け取る側は再検証しない。
@@ -89,7 +89,7 @@ enum OpsParser {
                 guard hypot(to.x - from.x, to.y - from.y) >= 1 else { throw fields.fail("直線の始点と終点が近すぎます（1 pt 以上離してください）") }
                 return .success(.line(from: from, to: to, color: try fields.color(), size: try fields.size()))
             case "ellipse", "rect":
-                try fields.allow(["op", "x", "y", "w", "h", "color", "size", "fill"])
+                try fields.allow(["op", "x", "y", "w", "h", "color", "size", "fill", "rotate"])
                 let rect = try fields.box(requireSize: true)
                 let color = try fields.color(), size = try fields.size()
                 var fill = false
@@ -98,21 +98,22 @@ enum OpsParser {
                     guard let flag = raw as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw fields.fail("`fill` は、true か false でなければなりません") }
                     fill = flag.boolValue
                 }
-                return .success(name == "rect" ? .rect(rect: rect, color: color, size: size, fill: fill) : .ellipse(rect: rect, color: color, size: size, fill: fill))
+                let rotate = try fields.rotate()
+                return .success(name == "rect" ? .rect(rect: rect, color: color, size: size, fill: fill, rotate: rotate) : .ellipse(rect: rect, color: color, size: size, fill: fill, rotate: rotate))
             case "text":
-                try fields.allow(["op", "x", "y", "text", "color", "fontSize"])
+                try fields.allow(["op", "x", "y", "text", "color", "fontSize", "rotate"])
                 guard let text = dict["text"] as? String else { throw fields.fail("`text` は、文字列でなければなりません") }
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw fields.fail("`text` が空（空白だけ）です") }
                 guard text.count <= maxTextLength else { throw fields.fail("`text` は \(maxTextLength) 文字までです（\(text.count) 文字）") }
                 let at = CGPoint(x: try fields.required("x"), y: try fields.required("y"))
                 let fontSize = try fields.optionalNumber("fontSize", in: fontSizeRange) ?? 18
-                return .success(.text(text, at: at, color: try fields.color(), fontSize: CGFloat(fontSize)))
+                return .success(.text(text, at: at, color: try fields.color(), fontSize: CGFloat(fontSize), rotate: try fields.rotate()))
             case "image":
-                try fields.allow(["op", "path", "x", "y", "w", "h"])
+                try fields.allow(["op", "path", "x", "y", "w", "h", "rotate"])
                 guard let path = dict["path"] as? String, !path.isEmpty else { throw fields.fail("`path` は、画像のファイルのパス（文字列）でなければなりません") }
                 let at = CGPoint(x: try fields.required("x"), y: try fields.required("y"))
                 let w = try fields.optionalSide("w"), h = try fields.optionalSide("h")
-                return .success(.image(path: path, at: at, width: w, height: h))
+                return .success(.image(path: path, at: at, width: w, height: h, rotate: try fields.rotate()))
             default:
                 throw fields.fail("知らない `op` です：\(name)（pen・line・ellipse・rect・text・image のどれか）")
             }
@@ -164,6 +165,13 @@ enum OpsParser {
         func optionalNumber(_ key: String, in range: ClosedRange<Double>) throws -> Double? {
             guard let raw = dict[key] else { return nil }
             guard let v = number(raw), range.contains(v) else { throw fail("`\(key)` は \(Int(range.lowerBound))〜\(Int(range.upperBound)) の数値でなければなりません") }
+            return v
+        }
+
+        /// 回転角（度。時計回りが正。有限の数値なら、どんな値でもよい。省くと 0）。
+        func rotate() throws -> Double {
+            guard let raw = dict["rotate"] else { return 0 }
+            guard let v = number(raw) else { throw fail("`rotate` は、数値（度。時計回りが正）でなければなりません") }
             return v
         }
 

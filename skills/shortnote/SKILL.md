@@ -42,15 +42,16 @@ SN=$(command -v snote || echo /Applications/ShortNote.app/Contents/MacOS/ShortNo
 |---|---|---|---|
 | `pen` | `points`: `[[x,y],...]` (1–10000 points) | `color` `size` | Freehand polyline (one point = a round dot) |
 | `line` | `from` `to` (length ≥ 1) | `color` `size` | Straight line |
-| `ellipse` | `x` `y` (top-left) `w` `h` (≥ 1) | `color` `size` `fill` (`true`/`false`, default `false`) | Outline of the ellipse inscribed in the box; with `fill: true`, a solid ellipse in `color` |
-| `rect` | same as `ellipse` | `color` `size` `fill` | Rectangle outline; with `fill: true`, a solid rectangle |
-| `text` | `x` `y` (top-left) `text` (1–10000 chars, `\n` for a newline, not whitespace-only) | `color` `fontSize` (8–200, default 18) | Text |
-| `image` | `path` `x` `y` (top-left) | `w` `h` (≥ 1) | Image. Without `w`/`h`: natural size (shrunk to fit if larger than the canvas). With only one: aspect ratio kept |
+| `ellipse` | `x` `y` (top-left) `w` `h` (≥ 1) | `color` `size` `fill` (`true`/`false`, default `false`) `rotate` (degrees, clockwise, default 0) | Outline of the ellipse inscribed in the box; with `fill: true`, a solid ellipse in `color` |
+| `rect` | same as `ellipse` | `color` `size` `fill` `rotate` | Rectangle outline; with `fill: true`, a solid rectangle |
+| `text` | `x` `y` (top-left) `text` (1–10000 chars, `\n` for a newline, not whitespace-only) | `color` `fontSize` (8–200, default 18) `rotate` | Text |
+| `image` | `path` `x` `y` (top-left) | `w` `h` (≥ 1) `rotate` | Image. Without `w`/`h`: natural size (shrunk to fit if larger than the canvas). With only one: aspect ratio kept |
 
 - **An unknown `op`, an unknown key or an out-of-range value is an error** (typos are never silently ignored). If any operation is invalid, **nothing is applied**. The error carries the 0-based index of the offending operation (`op`).
 - Limits: 1 MiB per request, 1000 ops, 20 images. UTF-8 JSON only.
 - Run `$SN --help` (or `$SN help <command>`, `$SN <command> --help`) for the built-in usage text, and `$SN --version` for the app version. They print plain text and exit 0 without starting the app.
 - `rect` and `ellipse` are outlines unless `"fill": true` (a solid shape in `color`, alpha respected; the stroke is the same colour, so the solid shape's outer edge is the outline's outer edge). To point at something without covering it, draw a frame (no fill) around it; use `fill` for markers and highlights (use an `#RRGGBBAA` colour with some transparency to highlight text without hiding it). `get` reports `fill` on these items.
+- `rotate` (on `ellipse`, `rect`, `text`, `image`) turns the item clockwise by that many degrees around the **centre of its box** (`x`,`y`,`w`,`h`; for text, its natural box). Coordinate clamping to the canvas edge happens before the turn. `pen` and `line` have no `rotate`: give the points already turned. `get` reports `rotate` (degrees, `-180 < r ≤ 180`, `0` when not turned) on those four kinds, so its items can be passed back to `draw` as they are; pen and line points come back already turned.
 - Text width is roughly `fontSize` per full-width (CJK) character and `fontSize × 0.55` per half-width character (a rule of thumb). After placing text, **always look at the output** to check it.
 - **There is no arrow op. Build one from 3 `line`s**: the shaft (tail → tip) and two arrowhead strokes from the tip. With tip `T`, tail `S`, `u` the unit vector from `T` toward `S`, and `L` the head length (20–25 pt is a good size), the head ends are `T + L·rot(u, +25°)` and `T + L·rot(u, −25°)`. Illustrative numbers (not tied to any image): tail (600,400), tip (310,245), L=24 → head ends (324.4,264.2) and (334,246.3). Put a label about 5 pt beyond the tail, along `u` reversed.
 - A stroke is centered on the shape's edge, extending `size/2` to each side. When **framing** a target without covering it, keep the frame at least `size/2` pt outside the target.

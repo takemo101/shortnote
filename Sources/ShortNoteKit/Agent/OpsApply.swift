@@ -46,31 +46,37 @@ enum OpsApply {
                 guard (a == from && b == to) || hypot(b.x - a.x, b.y - a.y) >= 1 else { result.skipped.append(i); continue }
                 result.items.append(Item(content: .line(from: a, to: b), color: color.cgColor, size: size))
 
-            case .ellipse(let rect, let color, let size, let fill), .rect(let rect, let color, let size, let fill):
+            case .ellipse(let rect, let color, let size, let fill, let rotate), .rect(let rect, let color, let size, let fill, let rotate):
                 let c1 = CGPoint(x: rect.minX, y: rect.minY), c2 = CGPoint(x: rect.maxX, y: rect.maxY)
                 let a = clamp(c1), b = clamp(c2)
                 let moved = a != c1 || b != c2    // 丸めなかった図形は、そのまま（浮動小数の丸め誤差で、幅 1 が 0.9999… になるのを避ける）
                 let box = moved ? CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y) : rect
                 guard !moved || (box.width >= 1 && box.height >= 1) else { result.skipped.append(i); continue }
                 if case .ellipse = op {
-                    result.items.append(Item(content: .ellipse(box), color: color.cgColor, size: size, filled: fill))
+                    result.items.append(Item(content: .ellipse(box), color: color.cgColor, size: size, filled: fill, rotation: radians(rotate)))
                 } else {
-                    result.items.append(Item(content: .rect(box), color: color.cgColor, size: size, filled: fill))
+                    result.items.append(Item(content: .rect(box), color: color.cgColor, size: size, filled: fill, rotation: radians(rotate)))
                 }
 
-            case .text(let text, let at, let color, let fontSize):
+            case .text(let text, let at, let color, let fontSize, let rotate):
                 let origin = clamp(at)
                 let size = CanvasRenderer.textSize(text, size: fontSize, color: color.cgColor)
-                result.items.append(Item(content: .text(text, box: CGRect(origin: origin, size: size)), color: color.cgColor, size: fontSize))
+                result.items.append(Item(content: .text(text, box: CGRect(origin: origin, size: size)), color: color.cgColor, size: fontSize, rotation: radians(rotate)))
 
-            case .image(let path, let at, let width, let height):
+            case .image(let path, let at, let width, let height, let rotate):
                 guard let image = loadImage(path) else { return .failure(.io("画像を読めません：\(path)", op: i)) }
                 let origin = clamp(at)
                 let box = imageBox(natural: image.pointSize, at: origin, width: width, height: height, canvas: canvas)
-                result.items.append(Item(content: .image(image, box: box), color: CGColor(gray: 0, alpha: 1), size: 0))
+                result.items.append(Item(content: .image(image, box: box), color: CGColor(gray: 0, alpha: 1), size: 0, rotation: radians(rotate)))
             }
         }
         return .success(result)
+    }
+
+    /// 操作の `rotate`（度。時計回りが正）を、要素の回転角（ラジアン。`(-π, π]`）にする。
+    /// 度のまま、360 で割った余りにしてから、ラジアンにする（1e308 のような値で、途中で無限大にならないように）。
+    static func radians(_ degrees: Double) -> CGFloat {
+        ItemHandles.normalized(CGFloat(degrees.truncatingRemainder(dividingBy: 360)) * .pi / 180)
     }
 
     /// 画像の枠。`w`・`h` を省くと自然な大きさ（キャンバスより大きければ、収まるよう縮小。拡大はしない）。

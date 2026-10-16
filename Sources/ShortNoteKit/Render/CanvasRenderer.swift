@@ -109,6 +109,12 @@ enum CanvasRenderer {
         ctx.setFillColor(item.color)
         ctx.setLineCap(.round)
         ctx.setLineJoin(.round)
+        if item.rotation != 0 {   // 枠の中心を軸に回す（円・四角・画像・文字だけが、回転角を持つ）
+            let box = item.unrotatedBounds
+            ctx.translateBy(x: box.midX, y: box.midY)
+            ctx.rotate(by: item.rotation)
+            ctx.translateBy(x: -box.midX, y: -box.midY)
+        }
 
         switch item.content {
         case .line(let a, let b):
@@ -146,7 +152,7 @@ enum CanvasRenderer {
     private static func drawFilled(_ item: Item, in ctx: CGContext, path: (CGContext) -> Void) {
         let opaque = item.color.copy(alpha: 1) ?? item.color
         ctx.setAlpha(item.color.alpha)
-        ctx.beginTransparencyLayer(in: item.bounds.insetBy(dx: -1, dy: -1), auxiliaryInfo: nil)
+        ctx.beginTransparencyLayer(in: item.unrotatedBounds.insetBy(dx: -1, dy: -1), auxiliaryInfo: nil)   // 回した座標系の中の範囲
         ctx.setFillColor(opaque)
         ctx.setStrokeColor(opaque)
         ctx.setLineWidth(item.size)

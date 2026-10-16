@@ -45,12 +45,12 @@ final class CanvasView: NSView {
     private var dragStart = CGPoint.zero
     /// 移動ツールで、動かしている要素の番号と、動かし始める前の文書。
     private var move: (index: Int, base: Document)?
-    /// 移動ツールで選ばれている要素の番号（画像・円・四角・直線。ペン・文字は選ばれない）。取っ手が出る（SPEC §3.2.3）。保存しない。
+    /// 移動ツールで選ばれている要素の番号（背景画像以外の、どの要素も選べる）。取っ手が出る（SPEC §3.2.3）。保存しない。
     private(set) var selectedItem: Int? {
         didSet { if oldValue != selectedItem { needsDisplay = true } }
     }
-    /// 取っ手をドラッグしているものと、掴んだ位置から取っ手までの差（`move` と同時に立つ）。
-    private var resizing: (handle: ItemResize.Handle, offset: CGSize)?
+    /// 取っ手をドラッグしているもの、掴んだ位置から取っ手までの差、掴んだ位置の角度（回転の取っ手のとき。軸から見た向き）。`move` と同時に立つ。
+    private var resizing: (handle: ItemHandles.Handle, offset: CGSize, startAngle: CGFloat)?
     private lazy var editor: InlineTextEditor = {
         let editor = InlineTextEditor(host: self)
         editor.onCommitRequested = { [weak self] in self?.commitEditing() }
@@ -284,10 +284,10 @@ final class CanvasView: NSView {
         case .text:
             beginText(at: p)
         case .move:
-            if let index = selectedItem, let target = document.resizeTarget(at: index), let handle = ItemResize.handle(at: p, in: target.shape),
-               let at = ItemResize.point(of: handle, in: target.shape) {
+            if let index = selectedItem, let target = document.resizeTarget(at: index), let handle = ItemHandles.handle(at: p, in: target.shape, canvas: bounds),
+               let at = ItemHandles.point(of: handle, in: target.shape, canvas: bounds) {
                 move = (index, document)
-                resizing = (handle, CGSize(width: at.x - p.x, height: at.y - p.y))
+                resizing = (handle, CGSize(width: at.x - p.x, height: at.y - p.y), ItemHandles.angle(from: ItemHandles.center(of: target.shape), to: p))
             } else if let index = document.topItemIndex(at: p) {
                 move = (index, document)
                 selectedItem = document.resizeTarget(at: index) != nil ? index : nil
@@ -303,12 +303,37 @@ final class CanvasView: NSView {
         let p = location(event)
         if let move {
             if let resizing, let target = move.base.resizeTarget(at: move.index) {
+                if resizing.handle == .rotate {
+                    // 軸から見た、掴んだ位置の向きと、いまのポインタの向きの差だけ回す。Shift なら 15° きざみ
+                    var delta = ItemHandles.normalized(ItemHandles.angle(from: ItemHandles.center(of: target.shape), to: p) - resizing.startAngle)
+                    if event.modifierFlags.contains(.shift) {
+                        if case .box(_, let base) = target.shape { delta = ItemHandles.snapped(base + delta) - base } else { delta = ItemHandles.snapped(delta) }
+                    }
+                    // 回した結果、掴める範囲が、キャンバスの中にほとんど残らなくなる向きへは、回さない（直前の向きのまま。移動と同じ 16 pt の規則）
+                    guard let rotated = move.base.rotating(itemAt: move.index, by: delta),
+                          rotated.keepsGrabArea(at: move.index, since: move.base, in: bounds) else { return }
+                    document = rotated
+                    needsDisplay = true
+                    return
+                }
                 // 掴んだ差を足したあとも、縁に丸める（SPEC §3.2）。いま縁の外にある取っ手は、その位置まで（触っただけで、縁へ跳ねない）
-                let grabbedAt = ItemResize.point(of: resizing.handle, in: target.shape) ?? p
+                let grabbedAt = ItemHandles.point(of: resizing.handle, in: target.shape, canvas: bounds) ?? p
                 let pointer = CGPoint(x: p.x + resizing.offset.width, y: p.y + resizing.offset.height).clamped(to: bounds.union(CGRect(origin: grabbedAt, size: .zero)))
+                let item = move.base.items[move.index]
+                if target.kind == .text, case .box(let box, let angle) = target.shape, case .corner(let corner) = resizing.handle, case .text(let text, _) = item.content {
+                    // 文字は、常に等倍：枠の倍率で、文字の大きさを変え、その大きさの枠を、反対側の角が動かないよう置く
+                    let range = CGFloat(OpsParser.fontSizeRange.lowerBound)...CGFloat(OpsParser.fontSizeRange.upperBound)
+                    let scaled = ItemHandles.scaledText(original: box, rotation: angle, corner: corner, pointer: pointer, fontSize: item.size, fontRange: range) {
+                        CanvasRenderer.textSize(text, size: $0, color: item.color)
+                    }
+                    guard let resized = move.base.applying(.box(scaled.box, rotation: angle), fontSize: scaled.fontSize, toItemAt: move.index) else { return }
+                    document = resized
+                    needsDisplay = true
+                    return
+                }
                 let keepAspect = target.keepsAspect != event.modifierFlags.contains(.shift)   // Shift は、既定と逆
                 // 形が下限を割る位置（直線が 1 pt 未満など）では、直前の形のまま
-                guard let shape = ItemResize.resized(target.shape, handle: resizing.handle, pointer: pointer, keepAspect: keepAspect, minSide: target.minSide),
+                guard let shape = ItemHandles.resized(target.shape, handle: resizing.handle, pointer: pointer, keepAspect: keepAspect, minSide: target.minSide),
                       let resized = move.base.applying(shape, toItemAt: move.index) else { return }
                 document = resized
                 needsDisplay = true
@@ -341,7 +366,7 @@ final class CanvasView: NSView {
             move = nil
             resizing = nil
             window?.invalidateCursorRects(for: self)
-            if document.hasMovedItem(at: finished.index, since: finished.base) {   // 上限で止まって動かなかったドラッグは、取り消しの段にしない
+            if document.hasChangedItem(at: finished.index, since: finished.base) {   // 上限で止まって動かなかったドラッグ、変わらなかった取っ手の操作は、取り消しの段にしない
                 history.record(previous: finished.base)
                 changed()
             }
@@ -416,26 +441,47 @@ final class CanvasView: NSView {
         drawSelectionHandles(in: ctx)
     }
 
-    /// 選ばれた要素の取っ手（画像・円・四角は点線の枠と四隅、直線は両端）。画面だけの表示で、書き出し（`renderPNG`）には入らない。
+    /// 選ばれた要素の取っ手。点線の枠（画像・円・四角・文字は、回した向きのまま。ペンは外接する範囲）、大きさの取っ手（四隅、直線は両端）、
+    /// 回転の取っ手（丸と、枠への線）。画面だけの表示で、書き出し（`renderPNG`）には入らない。
     private func drawSelectionHandles(in ctx: CGContext) {
         guard tool == .move, let index = selectedItem, let target = document.resizeTarget(at: index) else { return }
         ctx.saveGState()
+        defer { ctx.restoreGState() }
         ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
         ctx.setLineWidth(1)
-        if case .box(let box) = target.shape {
+        switch target.shape {
+        case .box(let box, let angle):
+            ctx.saveGState()
+            let c = ItemHandles.center(of: target.shape)
+            ctx.translateBy(x: c.x, y: c.y)
+            ctx.rotate(by: angle)
+            ctx.translateBy(x: -c.x, y: -c.y)
             ctx.setLineDash(phase: 0, lengths: [4, 3])
             ctx.stroke(box)
+            ctx.restoreGState()
+        case .stroke(let frame):
+            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.stroke(frame)
             ctx.setLineDash(phase: 0, lengths: [])
+        case .line:
+            break
         }
-        let s = ItemResize.handleSize
-        for handle in ItemResize.handles(of: target.shape) {
-            guard let p = ItemResize.point(of: handle, in: target.shape) else { continue }
+        let knob = ItemHandles.rotationHandle(of: target.shape, canvas: bounds)
+        ctx.move(to: knob.stem)
+        ctx.addLine(to: knob.handle)
+        ctx.strokePath()
+        let r = ItemHandles.handleSize / 2
+        ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+        let circle = CGRect(x: knob.handle.x - r, y: knob.handle.y - r, width: 2 * r, height: 2 * r)
+        ctx.fillEllipse(in: circle)
+        ctx.strokeEllipse(in: circle)
+        let s = ItemHandles.handleSize
+        for handle in ItemHandles.handles(of: target.shape) where handle != .rotate {
+            guard let p = ItemHandles.point(of: handle, in: target.shape, canvas: bounds) else { continue }
             let square = CGRect(x: p.x - s / 2, y: p.y - s / 2, width: s, height: s)
-            ctx.setFillColor(CGColor(gray: 1, alpha: 1))
             ctx.fill(square)
             ctx.stroke(square)
         }
-        ctx.restoreGState()
     }
 
     /// 現在のキャンバス全体の PNG。入力中の文字は、確定してから含める。生成できなければ `nil`。
