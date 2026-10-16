@@ -100,7 +100,8 @@ func dumpTree(_ app: AXUIElement) -> String {
 // 修飾キーなしのマウスにしたいときだけ、`clearMouseFlags` を立てる。nil の source では、直前に（修飾キーつきで）送ったキー入力の状態（Cmd+Shift など）が
 // マウスのイベントに引き継がれる（H4 で観測：Shift つきの扱いになり、縦横比が保たれた）。常には立てない（他の検証の、今までの条件を変えないため）。
 var clearMouseFlags = false
-func post(_ t: CGEventType, _ p: CGPoint) { let e = CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)!; if clearMouseFlags { e.flags = [] }; e.post(tap: .cghidEventTap); usleep(12_000) }
+var mouseShift = false   // `clearMouseFlags` が立っているとき、マウスのイベントに Shift をつける（範囲選択を、要素の上から始める検証）
+func post(_ t: CGEventType, _ p: CGPoint) { let e = CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)!; if clearMouseFlags { e.flags = mouseShift ? .maskShift : [] }; e.post(tap: .cghidEventTap); usleep(12_000) }
 func line(_ a: CGPoint, _ b: CGPoint, steps: Int = 24) -> [CGPoint] { (0...steps).map { CGPoint(x: a.x + (b.x - a.x) * CGFloat($0) / CGFloat(steps), y: a.y + (b.y - a.y) * CGFloat($0) / CGFloat(steps)) } }
 func drag(_ pts: [CGPoint], pid: pid_t) -> Bool {
     for p in [pts.first!, pts[pts.count / 2], pts.last!] where hitOwner(p) != pid { print("   guard refused drag at \(p): front-most owner=\(String(describing: hitOwner(p))) want \(pid)"); return false }
@@ -990,7 +991,11 @@ if let why = keyGuard(pid, app) {
         rec(lineIds[2], (control && clicked && nothingDrawn == false && afterUndo == false && afterRedo == true) ? "pass" : "fail", "control (pen click): dot there=\(String(describing: dotThere)), gone after Cmd+Z=\(String(describing: dotGone.map { !$0 })); line-tool click delivered=\(clicked), nothing drawn at the click=\(String(describing: nothingDrawn.map { !$0 })); after Cmd+Z the line is gone=\(String(describing: afterUndo.map { !$0 })); after Cmd+Shift+Z it is back=\(String(describing: afterRedo))")
 
         // 移動：中点を 60 pt 下へ。線は (120,160)〜(300,260) になる。
-        if selectTool(Seg.move), drag(line(pt(210, 150), pt(210, 210)), pid: pid) {
+        // 直前の Cmd+Shift+Z の Shift が、マウスのイベントに引き継がれると、Shift つきのドラッグ＝範囲選択になる（A33）ので、このドラッグの間だけ、flags を空にする
+        clearMouseFlags = true
+        let lineMoved = selectTool(Seg.move) && drag(line(pt(210, 150), pt(210, 210)), pid: pid)
+        clearMouseFlags = false
+        if lineMoved {
             let movedMid = darkAt(210, 210), oldMid = darkAt(210, 150)
             key(6, .maskCommand)
             let backMid = darkAt(210, 150), movedGone = darkAt(210, 210)
@@ -1630,6 +1635,56 @@ do {
         } else { rec(id, "blocked", "menu or drag guard failed (opened=\(opened) picked=\(picked) dragged=\(dragged))") }
         _ = selectTool(Seg.pen)
     } else { rec(id, "blocked", "could not read the button position") }
+    _ = runCLI(["clear"])
+}
+
+// ---- 範囲選択とまとめて移動（A33）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false; mouseShift = false }
+    let marqueeIds = [
+        "MQ1 move tool: a real-pointer drag from an empty spot selects the items fully inside it; dragging one selected item moves all of them together (the unselected one stays); Cmd+Z puts both back in one step",
+        "MQ2 Shift+drag started on top of a big frame selects the parts inside it (the frame is not moved); dragging a selected part then moves only the selected parts",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func xs() -> [Double?] { agentGet()?.items.filter { $0["op"] as? String == "rect" }.map { numOf($0["x"]) } ?? [] }
+    let drawn = agentDraw(##"{"op":"rect","x":40,"y":40,"w":40,"h":40,"color":"#000000"},{"op":"rect","x":140,"y":40,"w":40,"h":40,"color":"#000000"},{"op":"rect","x":300,"y":200,"w":40,"h":40,"color":"#000000"}"##)
+    if drawn.0 != 0 {
+        for id in marqueeIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
+    } else if keyGuard(pid, app) != nil {
+        for id in marqueeIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == 6, selectTool(Seg.move) {
+        // MQ1：何もない所 (10,10) から (200,100) へ。A（40）と B（140）が入り、C（300,200）は入らない
+        let marquee = drag(line(pt(10, 10), pt(200, 100)), pid: pid)
+        let afterMarquee = xs()
+        let group = drag(line(pt(160, 60), pt(190, 90)), pid: pid)      // B の中を掴んで (+30, +30)
+        let moved = xs()
+        key(6, .maskCommand)
+        let undone = xs()
+        if marquee, group {
+            let unchangedByMarquee = afterMarquee == [40, 140, 300]
+            let movedTogether = moved == [70, 170, 300]
+            rec(marqueeIds[0], (unchangedByMarquee && movedTogether && undone == [40, 140, 300]) ? "pass" : "fail",
+                "x of A,B,C after the marquee=\(afterMarquee) (expect unchanged 40,140,300); after dragging B=\(moved) (expect 70,170,300: A and B together, C stays); after one Cmd+Z=\(undone) (expect 40,140,300)")
+        } else { rec(marqueeIds[0], "blocked", "drag guard refused (marquee=\(marquee) group=\(group))") }
+
+        // MQ2：大きな枠（20,20 400×280）の中の、部品 2 つ（60 と 160）。Shift つきで、枠の上 (40,40) から (250,120)
+        _ = runCLI(["clear"])
+        agentDraw(##"{"op":"rect","x":20,"y":20,"w":400,"h":280,"color":"#000000"},{"op":"rect","x":60,"y":60,"w":40,"h":40,"color":"#000000"},{"op":"rect","x":160,"y":60,"w":40,"h":40,"color":"#000000"}"##)
+        _ = click(pt(450, 310))            // 何もない所：選びを外す（枠の外。キャンバスの右下の隅）
+        mouseShift = true
+        let shiftMarquee = drag(line(pt(40, 40), pt(250, 120)), pid: pid)
+        mouseShift = false
+        let afterShift = xs()
+        let partsMoved = drag(line(pt(80, 80), pt(100, 90)), pid: pid)   // 選ばれた部品の中を掴んで (+20, +10)
+        let result = xs()
+        if shiftMarquee, partsMoved {
+            rec(marqueeIds[1], (afterShift == [20, 60, 160] && result == [20, 80, 180]) ? "pass" : "fail",
+                "x of frame,part1,part2 after the Shift+marquee=\(afterShift) (expect 20,60,160: the frame was not moved); after dragging a selected part=\(result) (expect 20,80,180: only the two parts moved)")
+        } else { rec(marqueeIds[1], "blocked", "drag guard refused (shiftMarquee=\(shiftMarquee) partsMoved=\(partsMoved))") }
+        _ = selectTool(Seg.pen)
+    } else { for id in marqueeIds { rec(id, "blocked", "tool select failed") } }
     _ = runCLI(["clear"])
 }
 

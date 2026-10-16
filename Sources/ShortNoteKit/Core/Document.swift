@@ -61,6 +61,48 @@ struct Document {
         return !items[index].hasSameGeometry(as: base.items[index])
     }
 
+    /// `indices`（範囲外の番号は除く）の要素を、まとめて平行移動したものを返す。1 つも無ければ `nil`。
+    /// 動かす量は、**どの要素も**、掴める範囲（外接する範囲＋余白）が、16 pt の規則（`limited`）を満たすよう、軸ごとに、全員が許す幅の共通部分に収める
+    /// （全員が同じだけ動くので、位置関係は崩れない。和集合にだけ規則を当てると、離れた要素が、キャンバスの外へ完全に出て、掴めなくなる）。
+    func translatingItems(at indices: [Int], by d: CGSize, keepingGrabAreaIn canvas: CGRect) -> Document? {
+        let valid = indices.filter { items.indices.contains($0) }
+        guard !valid.isEmpty else { return nil }
+        var dx = d.width, dy = d.height
+        for index in valid {
+            let area = items[index].bounds.insetBy(dx: -Self.grabSlop, dy: -Self.grabSlop)
+            let x = Self.allowed(area.minX, area.width, canvas.minX, canvas.maxX, keep: Self.keptInCanvas)
+            let y = Self.allowed(area.minY, area.height, canvas.minY, canvas.maxY, keep: Self.keptInCanvas)
+            dx = min(max(dx, x.lowerBound), x.upperBound)
+            dy = min(max(dy, y.lowerBound), y.upperBound)
+        }
+        var copy = self
+        for index in valid { copy.items[index] = items[index].translated(by: CGSize(width: dx, height: dy)) }
+        return copy
+    }
+
+    /// 1 軸で、掴める範囲（`a0` から長さ `length`）が、キャンバス（`c0`〜`c1`）の中に `min(keep, length, いまの中にある分)` 以上残る、動かす量の幅。0 を必ず含む。
+    private static func allowed(_ a0: CGFloat, _ length: CGFloat, _ c0: CGFloat, _ c1: CGFloat, keep: CGFloat) -> ClosedRange<CGFloat> {
+        let a1 = a0 + length
+        let inside = max(0, min(a1, c1) - max(a0, c0))
+        let k = min(keep, length, inside)
+        return (c0 + k - a1)...(c1 - k - a0)
+    }
+
+    /// `indices` のどれかが、`base` から変わっているか。
+    func hasChangedItems(at indices: [Int], since base: Document) -> Bool {
+        indices.contains { hasChangedItem(at: $0, since: base) }
+    }
+
+    /// 外接する範囲（`bounds`）の、キャンバスの中にある部分が、`rect` にすっぽり入っている要素の番号（小さい順）。範囲選択に使う。
+    /// キャンバスの縁より外へはみ出した分（線の太さ・縁に触れて描いた図形）は、数えない（範囲は、縁に丸められるので、はみ出した要素が、選べなくなる）。
+    /// キャンバスの中に、まったく無い要素は、選ばれない。
+    func itemIndices(containedIn rect: CGRect, canvas: CGRect) -> [Int] {
+        items.indices.filter { index in
+            let visible = items[index].bounds.intersection(canvas)
+            return !visible.isNull && rect.contains(visible)
+        }
+    }
+
     /// `index` の要素（回したあと）の掴める範囲（外接する範囲＋4 pt）が、キャンバスの中に残る長さが、軸ごとに、
     /// `min(16 pt, 範囲の長さ, `base`（回す前）でキャンバスの中にあった分)` を下回らないか。移動と同じ規則（`limited`）を、回転にも当てる
     /// （回して、キャンバスの外へ出てしまい、掴めなくなるのを防ぐ）。
