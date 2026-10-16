@@ -25,7 +25,7 @@ struct RGBA: Equatable {
 /// エージェントからの操作 1 つ（SPEC §3.7）。検証済みの値だけを持つ（`OpsParser` が作る）。
 enum Op: Equatable {
     case pen(points: [CGPoint], color: RGBA, size: CGFloat)
-    case line(from: CGPoint, to: CGPoint, color: RGBA, size: CGFloat)
+    case line(from: CGPoint, to: CGPoint, color: RGBA, size: CGFloat, arrow: Item.Arrow = .none)
     case ellipse(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
     case rect(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
     case text(String, at: CGPoint, color: RGBA, fontSize: CGFloat, rotate: Double = 0)
@@ -84,10 +84,10 @@ enum OpsParser {
                 let points = try list.map { try fields.point($0, "points の要素") }
                 return .success(.pen(points: points, color: try fields.color(), size: try fields.size()))
             case "line":
-                try fields.allow(["op", "from", "to", "color", "size"])
+                try fields.allow(["op", "from", "to", "color", "size", "arrow"])
                 let from = try fields.point(dict["from"], "from"), to = try fields.point(dict["to"], "to")
                 guard hypot(to.x - from.x, to.y - from.y) >= 1 else { throw fields.fail("直線の始点と終点が近すぎます（1 pt 以上離してください）") }
-                return .success(.line(from: from, to: to, color: try fields.color(), size: try fields.size()))
+                return .success(.line(from: from, to: to, color: try fields.color(), size: try fields.size(), arrow: try fields.arrow()))
             case "ellipse", "rect":
                 try fields.allow(["op", "x", "y", "w", "h", "color", "size", "fill", "rotate"])
                 let rect = try fields.box(requireSize: true)
@@ -173,6 +173,13 @@ enum OpsParser {
             guard let raw = dict["rotate"] else { return 0 }
             guard let v = number(raw) else { throw fail("`rotate` は、数値（度。時計回りが正）でなければなりません") }
             return v
+        }
+
+        /// 矢じり（`"none"`・`"end"`・`"both"` の文字列だけ。省くと `none`）。
+        func arrow() throws -> Item.Arrow {
+            guard let raw = dict["arrow"] else { return .none }
+            guard let text = raw as? String, let arrow = Item.Arrow(rawValue: text) else { throw fail("`arrow` は、\"none\"・\"end\"・\"both\" のどれかでなければなりません") }
+            return arrow
         }
 
         func optionalSide(_ key: String) throws -> CGFloat? {

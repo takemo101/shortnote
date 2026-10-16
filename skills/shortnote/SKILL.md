@@ -41,7 +41,7 @@ SN=$(command -v snote || echo /Applications/ShortNote.app/Contents/MacOS/ShortNo
 | `op` | Required | Optional | Meaning |
 |---|---|---|---|
 | `pen` | `points`: `[[x,y],...]` (1–10000 points) | `color` `size` | Freehand polyline (one point = a round dot) |
-| `line` | `from` `to` (length ≥ 1) | `color` `size` | Straight line |
+| `line` | `from` `to` (length ≥ 1) | `color` `size` `arrow` (`"none"` default, `"end"`, `"both"`; strings only) | Straight line; with `arrow`, arrowhead strokes at the end (`to`) or at both ends |
 | `ellipse` | `x` `y` (top-left) `w` `h` (≥ 1) | `color` `size` `fill` (`true`/`false`, default `false`) `rotate` (degrees, clockwise, default 0) | Outline of the ellipse inscribed in the box; with `fill: true`, a solid ellipse in `color` |
 | `rect` | same as `ellipse` | `color` `size` `fill` `rotate` | Rectangle outline; with `fill: true`, a solid rectangle |
 | `text` | `x` `y` (top-left) `text` (1–10000 chars, `\n` for a newline, not whitespace-only) | `color` `fontSize` (8–200, default 18) `rotate` | Text |
@@ -53,7 +53,7 @@ SN=$(command -v snote || echo /Applications/ShortNote.app/Contents/MacOS/ShortNo
 - `rect` and `ellipse` are outlines unless `"fill": true` (a solid shape in `color`, alpha respected; the stroke is the same colour, so the solid shape's outer edge is the outline's outer edge). To point at something without covering it, draw a frame (no fill) around it; use `fill` for markers and highlights (use an `#RRGGBBAA` colour with some transparency to highlight text without hiding it). `get` reports `fill` on these items.
 - `rotate` (on `ellipse`, `rect`, `text`, `image`) turns the item clockwise by that many degrees around the **centre of its box** (`x`,`y`,`w`,`h`; for text, its natural box). Coordinate clamping to the canvas edge happens before the turn. `pen` and `line` have no `rotate`: give the points already turned. `get` reports `rotate` (degrees, `-180 < r ≤ 180`, `0` when not turned) on those four kinds, so its items can be passed back to `draw` as they are; pen and line points come back already turned.
 - Text width is roughly `fontSize` per full-width (CJK) character and `fontSize × 0.55` per half-width character (a rule of thumb). After placing text, **always look at the output** to check it.
-- **There is no arrow op. Build one from 3 `line`s**: the shaft (tail → tip) and two arrowhead strokes from the tip. With tip `T`, tail `S`, `u` the unit vector from `T` toward `S`, and `L` the head length (20–25 pt is a good size), the head ends are `T + L·rot(u, +25°)` and `T + L·rot(u, −25°)`. Illustrative numbers (not tied to any image): tail (600,400), tip (310,245), L=24 → head ends (324.4,264.2) and (334,246.3). Put a label about 5 pt beyond the tail, along `u` reversed.
+- **Arrows are `line` with `"arrow": "end"` (head at `to`) or `"both"`.** The head is two short strokes opening 28° either side of the line, `10 + size × 2.5` pt long (capped at 2/3 of the line's length), in the line's colour and size; a 20–25 pt head is what you get with `size` 4–6. Put the tail (`from`) where the label is and the tip (`to`) on the target, and keep the tip about `size/2` pt off the target's edge. `get` reports `arrow` on every line.
 - A stroke is centered on the shape's edge, extending `size/2` to each side. When **framing** a target without covering it, keep the frame at least `size/2` pt outside the target.
 
 ## Annotating an image (`render`)

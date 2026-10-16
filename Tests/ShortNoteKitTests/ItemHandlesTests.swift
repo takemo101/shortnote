@@ -324,6 +324,7 @@ struct ItemHandlesGeometryTests {
 }
 
 @Suite("要素の回転：文書・描画・書き出し（A30）")
+@MainActor
 struct ItemRotationDocumentTests {
     @Test("回した要素の bounds は、回したあとの外接する範囲（掴める範囲・動かせる範囲は、これで決まる）")
     func rotatedBounds() {
@@ -426,6 +427,7 @@ struct ItemRotationDocumentTests {
 }
 
 @Suite("取っ手：キャンバスの操作（A29〜A31）")
+@MainActor
 struct ItemHandlesCanvasTests {
     private func canvas(_ items: [Item]) -> CanvasView {
         let canvas = CanvasView(frame: NSRect(x: 0, y: 0, width: 480, height: 320))
@@ -712,6 +714,7 @@ struct RotateOpsTests {
 }
 
 @Suite("回転の安全（レビューの指摘）")
+@MainActor
 struct RotationSafetyTests {
     @Test("rotate に、とても大きい有限の値でも、回転角は NaN にならず、掴める")
     func hugeRotateStaysFinite() throws {

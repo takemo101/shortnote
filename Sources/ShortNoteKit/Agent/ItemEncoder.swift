@@ -18,6 +18,7 @@ enum ItemEncoder {
             out["to"] = [number(to.x), number(to.y)]
             out["color"] = hex(item.color)
             out["size"] = number(item.size)
+            out["arrow"] = item.arrow.rawValue
         case .ellipse(let rect), .rect(let rect):
             if case .ellipse = item.content { out["op"] = "ellipse" } else { out["op"] = "rect" }
             out["x"] = number(rect.minX); out["y"] = number(rect.minY)

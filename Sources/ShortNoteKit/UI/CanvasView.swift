@@ -23,6 +23,8 @@ final class CanvasView: NSView {
     /// 円・四角を、枠だけにするか、塗りつぶすか（円と四角で別々。保存しない。SPEC §3.2.2）。
     var fillEllipse = false
     var fillRect = false
+    /// 直線の矢じり（線・矢印・両端の矢印。保存しない。SPEC §3.2.2）。
+    var lineArrow: Item.Arrow = .none
     /// 文字サイズ（ブラシサイズとは別）。入力中に変えると、入力中の文字の大きさも変わる。
     var textSize: CGFloat = TextSize.default {
         didSet { editor.setFontSize(textSize) }
@@ -280,7 +282,7 @@ final class CanvasView: NSView {
         case .rect:
             draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillRect)
         case .line:
-            draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize)
+            draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize, arrow: lineArrow)
         case .text:
             beginText(at: p)
         case .move:

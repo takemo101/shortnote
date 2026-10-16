@@ -32,6 +32,12 @@ struct Item {
     var filled = false
     /// 回転角（ラジアン。時計回りが正。`(-π, π]`）。枠の中心が軸。円・四角・画像・文字だけが持つ（ペン・直線は、点そのものを回すので、常に 0）。
     var rotation: CGFloat = 0
+    /// 直線の矢じり（`none`・`end`＝終点・`both`＝両端）。直線だけが持つ（ほかの要素では `none`）。SPEC §3.2.2。
+    var arrow: Arrow = .none
+
+    enum Arrow: String {
+        case none, end, both
+    }
 
     /// 要素を囲む範囲（移動ツールが掴める範囲）。線の太さの分だけ外側まで含める。回転しているときは、回したあとの外接する範囲（軸に平行な最小の四角）。
     var bounds: CGRect {
@@ -49,7 +55,9 @@ struct Item {
     var unrotatedBounds: CGRect {
         switch content {
         case .line(let a, let b):
-            return CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y)).insetBy(dx: -size / 2, dy: -size / 2)
+            let ends = [a, b] + Arrowhead.segments(from: a, to: b, size: size, arrow: arrow).map(\.end)   // 矢じりの先まで含める
+            let xs = ends.map(\.x), ys = ends.map(\.y)
+            return CGRect(x: xs.min()!, y: ys.min()!, width: xs.max()! - xs.min()!, height: ys.max()! - ys.min()!).insetBy(dx: -size / 2, dy: -size / 2)
         case .pen(let points):
             guard let first = points.first else { return .zero }
             var minX = first.point.x, maxX = minX, minY = first.point.y, maxY = minY

@@ -41,10 +41,10 @@ enum OpsApply {
                 let strokes = moved.map { StrokePoint(point: $0, pressure: 1) }
                 result.items.append(Item(content: .pen(points: strokes), color: color.cgColor, size: size))
 
-            case .line(let from, let to, let color, let size):
+            case .line(let from, let to, let color, let size, let arrow):
                 let a = clamp(from), b = clamp(to)
                 guard (a == from && b == to) || hypot(b.x - a.x, b.y - a.y) >= 1 else { result.skipped.append(i); continue }
-                result.items.append(Item(content: .line(from: a, to: b), color: color.cgColor, size: size))
+                result.items.append(Item(content: .line(from: a, to: b), color: color.cgColor, size: size, arrow: arrow))
 
             case .ellipse(let rect, let color, let size, let fill, let rotate), .rect(let rect, let color, let size, let fill, let rotate):
                 let c1 = CGPoint(x: rect.minX, y: rect.minY), c2 = CGPoint(x: rect.maxX, y: rect.maxY)

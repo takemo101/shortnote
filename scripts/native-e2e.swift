@@ -1520,6 +1520,119 @@ do {
     } else { for id in rotIds { rec(id, "blocked", "tool select failed") } }
 }
 
+// ---- 矢印（A32）----
+do {
+    let arrowIds = [
+        "AR1 draw with arrow:\"both\": get reports arrow=both, and the export shows dark arrowhead strokes at both ends of the line (none for a plain line)",
+        "AR2 the line button's menu (AXShowMenu → 矢印) selects the arrow; a real-pointer drag then draws a line with arrow=end and an arrowhead at its end only; a plain press of the line button afterwards keeps the choice",
+        "AR3 choosing 線 from the menu draws plain lines again (arrow=none, no arrowhead pixels)",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func lastLine() -> [String: Any]? { agentGet()?.items.last(where: { $0["op"] as? String == "line" }) }
+    // 矢じりの腕の、途中の点（先端から 10 pt。28° 開く）。直線は水平
+    func armPoints(tipX: Double, y: Double, towardPlus: Bool) -> [(Double, Double)] {
+        let dx = 10 * cos(28 * Double.pi / 180) * (towardPlus ? 1 : -1), dy = 10 * sin(28 * Double.pi / 180)
+        return [(tipX + dx, y - dy), (tipX + dx, y + dy)]
+    }
+    func darkAt(_ rep: NSBitmapImageRep, _ p: (Double, Double)) -> Bool { isDark(at(rep, p.0, p.1)) }
+
+    // AR1：draw（アプリに触れずに、矢じりの形を見る）
+    let drawn = agentDraw(##"{"op":"line","from":[100,200],"to":[300,200],"color":"#000000","arrow":"both"},{"op":"line","from":[100,260],"to":[300,260],"color":"#000000"}"##)
+    if drawn.0 != 0 {
+        rec(arrowIds[0], "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)")
+    } else if let g = agentGet(), let ex = agentExportRep() {
+        let arrows = g.items.map { $0["arrow"] as? String }
+        let bothEnds = armPoints(tipX: 300, y: 200, towardPlus: false) + armPoints(tipX: 100, y: 200, towardPlus: true)
+        let plainArms = armPoints(tipX: 300, y: 260, towardPlus: false) + armPoints(tipX: 100, y: 260, towardPlus: true)
+        let bothDark = bothEnds.map { darkAt(ex.rep, $0) }, plainDark = plainArms.map { darkAt(ex.rep, $0) }
+        rec(arrowIds[0], (arrows == ["both", "none"] && bothDark.allSatisfy { $0 } && plainDark.allSatisfy { !$0 }) ? "pass" : "fail",
+            "get arrow=\(arrows) (expect [both, none]); arrowhead pixels dark for the arrow line=\(bothDark) (expect all true), for the plain line=\(plainDark) (expect all false)")
+    } else { rec(arrowIds[0], "blocked", "get or export failed") }
+
+    // AR2・AR3：ツールバーのメニュー（AXShowMenu）と、実機のポインタ
+    func menuItem(_ title: String) -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first }
+    func chooseLine(_ title: String) -> Bool {
+        AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
+        _ = AXUIElementPerformAction(radios[Seg.line], "AXShowMenu" as CFString)
+        guard wait(3, { menuItem(title) != nil }), let item = menuItem(title) else { return false }
+        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+    }
+    _ = runCLI(["clear"])
+    if keyGuard(pid, app) != nil {
+        rec(arrowIds[1], "blocked", "keyboard guard"); rec(arrowIds[2], "blocked", "keyboard guard")
+    } else if radios.count == 6, selectTool(Seg.pen) {
+        let picked = chooseLine("矢印")
+        let toolIsLine = wait(2) { (ax(radios[Seg.line], "AXValue") as? NSNumber)?.intValue == 1 }
+        usleep(400_000)   // メニューが閉じ切るのを待つ（閉じ切る前の最初のクリックは、メニューを閉じるだけになる）
+        let d1 = drag(line(pt(100, 100), pt(300, 100)), pid: pid)
+        let first = lastLine()
+        // ボタンを普通に押す（AXPress）だけでは、選びは変わらない
+        _ = selectTool(Seg.pen)
+        let pressed = selectTool(Seg.line)
+        let d2 = drag(line(pt(100, 150), pt(300, 150)), pid: pid)
+        let second = lastLine()
+        if d1, d2, let ex = agentExportRep() {
+            let endArms = armPoints(tipX: 300, y: 100, towardPlus: false), startArms = armPoints(tipX: 100, y: 100, towardPlus: true)
+            let endDark = endArms.map { darkAt(ex.rep, $0) }, startDark = startArms.map { darkAt(ex.rep, $0) }
+            let keptArrow = (second?["arrow"] as? String) == "end"
+            rec(arrowIds[1], (picked && toolIsLine && pressed && (first?["arrow"] as? String) == "end" && keptArrow && endDark.allSatisfy { $0 } && startDark.allSatisfy { !$0 }) ? "pass" : "fail",
+                "menu pick=\(picked) tool is line=\(toolIsLine); first drag arrow=\(String(describing: first?["arrow"])) (expect end); after a plain press the next line's arrow=\(String(describing: second?["arrow"])) (expect end, plain press keeps the choice); arrowhead at the end dark=\(endDark), at the start dark=\(startDark) (expect false)")
+        } else { rec(arrowIds[1], "blocked", "drag guard refused or export failed (picked=\(picked) d1=\(d1) d2=\(d2))") }
+
+        _ = selectTool(Seg.pen)
+        let plainPicked = chooseLine("線")
+        _ = wait(2) { (ax(radios[Seg.line], "AXValue") as? NSNumber)?.intValue == 1 }
+        usleep(400_000)
+        let d3 = drag(line(pt(100, 200), pt(300, 200)), pid: pid)
+        let third = lastLine()
+        if d3, let ex = agentExportRep() {
+            let arms = armPoints(tipX: 300, y: 200, towardPlus: false)
+            let dark = arms.map { darkAt(ex.rep, $0) }
+            rec(arrowIds[2], (plainPicked && (third?["arrow"] as? String) == "none" && dark.allSatisfy { !$0 }) ? "pass" : "fail",
+                "menu pick=\(plainPicked); line arrow=\(String(describing: third?["arrow"])) (expect none); arrowhead pixels dark=\(dark) (expect false)")
+        } else { rec(arrowIds[2], "blocked", "drag guard refused or export failed (picked=\(plainPicked) d3=\(d3))") }
+        _ = selectTool(Seg.pen)
+    } else { rec(arrowIds[1], "blocked", "tool select failed"); rec(arrowIds[2], "blocked", "tool select failed") }
+    _ = runCLI(["clear"])
+}
+
+// ---- 矢印：「両端の矢印」を選んでも、ツールバーの幅が変わらない（A32。レビューの指摘：絵が 2 pt 大きく、最小幅の余裕を食っていた）----
+do {
+    let id = "AR4 choosing 両端の矢印 does not move the buttons to its right (the toolbar keeps its width) and draws arrowheads at both ends"
+    _ = runCLI(["clear"])
+    func xOf(_ e: AXUIElement) -> Double? {
+        guard let pv = ax(e, "AXPosition") else { return nil }
+        var p = CGPoint.zero
+        AXValueGetValue(pv as! AXValue, .cgPoint, &p)
+        return Double(p.x)
+    }
+    func menuItem(_ title: String) -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first }
+    if keyGuard(pid, app) != nil || radios.count != 6 || !selectTool(Seg.pen) {
+        rec(id, "blocked", "keyboard guard or tool select failed")
+    } else if let before = xOf(radios[Seg.move]) {
+        AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
+        _ = AXUIElementPerformAction(radios[Seg.line], "AXShowMenu" as CFString)
+        let opened = wait(3) { menuItem("両端の矢印") != nil }
+        let picked = menuItem("両端の矢印").map { AXUIElementPerformAction($0, kAXPressAction as CFString) == .success } ?? false
+        usleep(500_000)
+        let after = xOf(radios[Seg.move])
+        let dragged = drag(line(pt(100, 100), pt(300, 100)), pid: pid)
+        let drawnLine = agentGet()?.items.last(where: { $0["op"] as? String == "line" })
+        if opened, picked, dragged, let after, let ex = agentExportRep() {
+            func arm(_ tipX: Double, _ plus: Bool) -> [(Double, Double)] {
+                let dx = 10 * cos(28 * Double.pi / 180) * (plus ? 1 : -1), dy = 10 * sin(28 * Double.pi / 180)
+                return [(tipX + dx, 100 - dy), (tipX + dx, 100 + dy)]
+            }
+            let dark = (arm(300, false) + arm(100, true)).map { isDark(at(ex.rep, $0.0, $0.1)) }
+            rec(id, (abs(after - before) <= 1 && (drawnLine?["arrow"] as? String) == "both" && dark.allSatisfy { $0 }) ? "pass" : "fail",
+                "x of the move button before=\(before) after=\(after) (expect the same ±1); drawn line arrow=\(String(describing: drawnLine?["arrow"])) (expect both); arrowhead pixels at both ends dark=\(dark)")
+        } else { rec(id, "blocked", "menu or drag guard failed (opened=\(opened) picked=\(picked) dragged=\(dragged))") }
+        _ = selectTool(Seg.pen)
+    } else { rec(id, "blocked", "could not read the button position") }
+    _ = runCLI(["clear"])
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
