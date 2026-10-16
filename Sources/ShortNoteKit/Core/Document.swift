@@ -61,17 +61,28 @@ struct Document {
         return items[index].bounds != base.items[index].bounds
     }
 
-    /// `index` の要素が画像（貼り付け・ドロップ・ファイル選択で足したもの）なら、その枠。背景画像は要素ではないので、`nil`。
-    func imageBox(at index: Int) -> CGRect? {
-        guard items.indices.contains(index), case .image(_, let box) = items[index].content else { return nil }
-        return box
+    /// `index` の要素の、大きさを変えるときの形と規則。変えられない要素（ペン・文字）・範囲外・背景画像（要素ではない）は `nil`。
+    func resizeTarget(at index: Int) -> ItemResize.Target? {
+        guard items.indices.contains(index) else { return nil }
+        switch items[index].content {
+        case .image(_, let box): return ItemResize.Target(shape: .box(box), keepsAspect: true, minSide: ItemResize.imageMinSide)
+        case .ellipse(let rect), .rect(let rect): return ItemResize.Target(shape: .box(rect), keepsAspect: false, minSide: ItemResize.shapeMinSide)
+        case .line(let from, let to): return ItemResize.Target(shape: .line(from: from, to: to), keepsAspect: false, minSide: 0)
+        case .pen, .text: return nil
+        }
     }
 
-    /// `index` の画像の枠を `box` にしたものを返す。画像でなければ `nil`。
-    func resizingImage(at index: Int, to box: CGRect) -> Document? {
-        guard items.indices.contains(index), case .image(let image, _) = items[index].content else { return nil }
+    /// `index` の要素の形を `shape` にしたものを返す（色・太さ・塗りつぶしは、そのまま）。要素の種類と形が合わないときは `nil`。
+    func applying(_ shape: ItemResize.Shape, toItemAt index: Int) -> Document? {
+        guard items.indices.contains(index) else { return nil }
         var copy = self
-        copy.items[index].content = .image(image, box: box)
+        switch (items[index].content, shape) {
+        case (.image(let image, _), .box(let box)): copy.items[index].content = .image(image, box: box)
+        case (.ellipse, .box(let box)): copy.items[index].content = .ellipse(box)
+        case (.rect, .box(let box)): copy.items[index].content = .rect(box)
+        case (.line, .line(let from, let to)): copy.items[index].content = .line(from: from, to: to)
+        default: return nil
+        }
         return copy
     }
 
