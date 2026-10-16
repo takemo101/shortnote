@@ -49,6 +49,7 @@ SN=$(command -v snote || echo /Applications/ShortNote.app/Contents/MacOS/ShortNo
 
 - **An unknown `op`, an unknown key or an out-of-range value is an error** (typos are never silently ignored). If any operation is invalid, **nothing is applied**. The error carries the 0-based index of the offending operation (`op`).
 - Limits: 1 MiB per request, 1000 ops, 20 images. UTF-8 JSON only.
+- Run `$SN --help` (or `$SN help <command>`, `$SN <command> --help`) for the built-in usage text, and `$SN --version` for the app version. They print plain text and exit 0 without starting the app.
 - `rect` and `ellipse` are outlines only (no fill). To emphasize something, draw a frame around it.
 - Text width is roughly `fontSize` per full-width (CJK) character and `fontSize × 0.55` per half-width character (a rule of thumb). After placing text, **always look at the output** to check it.
 - **There is no arrow op. Build one from 3 `line`s**: the shaft (tail → tip) and two arrowhead strokes from the tip. With tip `T`, tail `S`, `u` the unit vector from `T` toward `S`, and `L` the head length (20–25 pt is a good size), the head ends are `T + L·rot(u, +25°)` and `T + L·rot(u, −25°)`. Illustrative numbers (not tied to any image): tail (600,400), tip (310,245), L=24 → head ends (324.4,264.2) and (334,246.3). Put a label about 5 pt beyond the tail, along `u` reversed.

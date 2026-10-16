@@ -1047,6 +1047,16 @@ do {
     let json4 = (try? JSONSerialization.jsonObject(with: Data(r4.1.utf8))) as? [String: Any]
     rec(renderIds[3], (r4.0 == 0 && json4?["clamped"] as? [Int] == [0] && FileManager.default.fileExists(atPath: stdinOut)) ? "pass" : "fail",
         "exit=\(r4.0) stdout=\(r4.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(r4.2)'")
+    // R5：--help と --version は、アプリを起動せずに、使い方と版を出して、終了コード 0（常駐中のアプリが動いていても、増えない）
+    let plistVersion = sh(["plutil", "-extract", "CFBundleShortVersionString", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
+    let appsBefore5 = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).count
+    let h = runCLI(["--help"]), hr = runCLI(["render", "--help"]), v = runCLI(["--version"]), v2 = runCLI(["version"]), bad = runCLI(["help", "nope"])
+    let appsAfter5 = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).count
+    rec("R5 --help / render --help / --version print and exit 0 without starting the app; an unknown help topic exits 2",
+        (h.0 == 0 && h.1.contains("Usage:") && h.1.contains("snote draw") && hr.0 == 0 && hr.1.hasPrefix("Usage: snote render")
+         && v.0 == 0 && v.1.trimmingCharacters(in: .whitespacesAndNewlines) == "ShortNote \(plistVersion)" && v2.1 == v.1
+         && bad.0 == 2 && appsBefore5 >= 1 && appsBefore5 == appsAfter5) ? "pass" : "fail",
+        "--help exit=\(h.0) (\(h.1.count) chars); render --help exit=\(hr.0); --version exit=\(v.0) stdout='\(v.1.trimmingCharacters(in: .whitespacesAndNewlines))' (Info.plist \(plistVersion)); help nope exit=\(bad.0); running instances before/after=\(appsBefore5)/\(appsAfter5)")
 }
 
 // ---- エージェントの操作：常駐中のアプリへ（A22〜A24。draw・get・export・clear とソケット）----

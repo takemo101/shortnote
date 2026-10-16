@@ -72,6 +72,8 @@ $ShortNote clear             # 描いたものを消す（背景は残る。取�
 ```sh
 snote render screenshot.png ops.json -o out.png
 snote draw ops.json
+snote --help                 # 使い方（`snote help draw` や `snote draw --help` で、コマンドごとの説明）
+snote --version              # ShortNote 0.2.0 のように、版
 ```
 
 自分で張るなら、次のとおりです（アプリを「アプリケーション」に置いてから）。
