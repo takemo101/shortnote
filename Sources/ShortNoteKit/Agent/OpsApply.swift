@@ -46,16 +46,16 @@ enum OpsApply {
                 guard (a == from && b == to) || hypot(b.x - a.x, b.y - a.y) >= 1 else { result.skipped.append(i); continue }
                 result.items.append(Item(content: .line(from: a, to: b), color: color.cgColor, size: size))
 
-            case .ellipse(let rect, let color, let size), .rect(let rect, let color, let size):
+            case .ellipse(let rect, let color, let size, let fill), .rect(let rect, let color, let size, let fill):
                 let c1 = CGPoint(x: rect.minX, y: rect.minY), c2 = CGPoint(x: rect.maxX, y: rect.maxY)
                 let a = clamp(c1), b = clamp(c2)
                 let moved = a != c1 || b != c2    // 丸めなかった図形は、そのまま（浮動小数の丸め誤差で、幅 1 が 0.9999… になるのを避ける）
                 let box = moved ? CGRect(x: a.x, y: a.y, width: b.x - a.x, height: b.y - a.y) : rect
                 guard !moved || (box.width >= 1 && box.height >= 1) else { result.skipped.append(i); continue }
                 if case .ellipse = op {
-                    result.items.append(Item(content: .ellipse(box), color: color.cgColor, size: size))
+                    result.items.append(Item(content: .ellipse(box), color: color.cgColor, size: size, filled: fill))
                 } else {
-                    result.items.append(Item(content: .rect(box), color: color.cgColor, size: size))
+                    result.items.append(Item(content: .rect(box), color: color.cgColor, size: size, filled: fill))
                 }
 
             case .text(let text, let at, let color, let fontSize):

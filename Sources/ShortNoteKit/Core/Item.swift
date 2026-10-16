@@ -28,6 +28,8 @@ struct Item {
     var color: CGColor
     /// ペンと図形では線の太さ、文字では文字の大きさ。画像では使わない。
     var size: CGFloat
+    /// 円・四角で、枠の内側を、色で塗りつぶすか。ほかの要素では使わない（`false`）。
+    var filled = false
 
     /// 要素を囲む範囲（移動ツールが掴める範囲）。線の太さの分だけ外側まで含める。
     var bounds: CGRect {

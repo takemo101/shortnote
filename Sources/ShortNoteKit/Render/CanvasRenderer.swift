@@ -119,17 +119,40 @@ enum CanvasRenderer {
         case .pen(let points):
             drawStroke(points, size: item.size, in: ctx)
         case .rect(let rect):
-            ctx.setLineWidth(item.size)
-            ctx.stroke(rect)
+            if item.filled {
+                drawFilled(item, in: ctx) { $0.addRect(rect) }
+            } else {
+                ctx.setLineWidth(item.size)
+                ctx.stroke(rect)
+            }
         case .ellipse(let rect):
-            ctx.setLineWidth(item.size)
-            ctx.strokeEllipse(in: rect)
+            if item.filled {
+                drawFilled(item, in: ctx) { $0.addEllipse(in: rect) }
+            } else {
+                ctx.setLineWidth(item.size)
+                ctx.strokeEllipse(in: rect)
+            }
         case .text(let text, let box):
             NSAttributedString(string: text, attributes: textAttributes(size: item.size, color: item.color))
                 .draw(with: box, options: [.usesLineFragmentOrigin])
         case .image(let image, let box):
             drawImage(image, in: box, ctx)
         }
+    }
+
+    /// 塗りつぶした図形：枠と同じ外形（線の太さを含む）の内側を、色で塗る。枠の線も、同じ色で引く（外形に溶ける）。
+    /// 透明度のある色でも、塗りと線の重なりが濃くならないよう、不透明な色で描いた 1 枚を、透明度つきで重ねる。
+    /// 1 枚の大きさは、図形の外接する範囲まで（キャンバス全体の大きさにすると、図形の数だけ、大きなバッファを取り、遅い）。
+    private static func drawFilled(_ item: Item, in ctx: CGContext, path: (CGContext) -> Void) {
+        let opaque = item.color.copy(alpha: 1) ?? item.color
+        ctx.setAlpha(item.color.alpha)
+        ctx.beginTransparencyLayer(in: item.bounds.insetBy(dx: -1, dy: -1), auxiliaryInfo: nil)
+        ctx.setFillColor(opaque)
+        ctx.setStrokeColor(opaque)
+        ctx.setLineWidth(item.size)
+        path(ctx)
+        ctx.drawPath(using: .fillStroke)
+        ctx.endTransparencyLayer()
     }
 
     /// 筆圧に応じて太さを変えながら、点をつないで描く。点が 1 つなら丸を打つ。

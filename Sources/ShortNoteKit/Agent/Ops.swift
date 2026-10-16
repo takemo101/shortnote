@@ -26,8 +26,8 @@ struct RGBA: Equatable {
 enum Op: Equatable {
     case pen(points: [CGPoint], color: RGBA, size: CGFloat)
     case line(from: CGPoint, to: CGPoint, color: RGBA, size: CGFloat)
-    case ellipse(rect: CGRect, color: RGBA, size: CGFloat)
-    case rect(rect: CGRect, color: RGBA, size: CGFloat)
+    case ellipse(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false)
+    case rect(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false)
     case text(String, at: CGPoint, color: RGBA, fontSize: CGFloat)
     case image(path: String, at: CGPoint, width: CGFloat?, height: CGFloat?)
 }
@@ -89,10 +89,16 @@ enum OpsParser {
                 guard hypot(to.x - from.x, to.y - from.y) >= 1 else { throw fields.fail("直線の始点と終点が近すぎます（1 pt 以上離してください）") }
                 return .success(.line(from: from, to: to, color: try fields.color(), size: try fields.size()))
             case "ellipse", "rect":
-                try fields.allow(["op", "x", "y", "w", "h", "color", "size"])
+                try fields.allow(["op", "x", "y", "w", "h", "color", "size", "fill"])
                 let rect = try fields.box(requireSize: true)
                 let color = try fields.color(), size = try fields.size()
-                return .success(name == "rect" ? .rect(rect: rect, color: color, size: size) : .ellipse(rect: rect, color: color, size: size))
+                var fill = false
+                if let raw = dict["fill"] {
+                    // 真偽値だけ（`0`・`1`・文字列は、エラー）。JSON の true/false は、CFBoolean になる。
+                    guard let flag = raw as? NSNumber, CFGetTypeID(flag) == CFBooleanGetTypeID() else { throw fields.fail("`fill` は、true か false でなければなりません") }
+                    fill = flag.boolValue
+                }
+                return .success(name == "rect" ? .rect(rect: rect, color: color, size: size, fill: fill) : .ellipse(rect: rect, color: color, size: size, fill: fill))
             case "text":
                 try fields.allow(["op", "x", "y", "text", "color", "fontSize"])
                 guard let text = dict["text"] as? String else { throw fields.fail("`text` は、文字列でなければなりません") }
