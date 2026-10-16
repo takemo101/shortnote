@@ -1442,6 +1442,84 @@ do {
     } else { for id in shapeIds { rec(id, "blocked", "tool select failed") } }
 }
 
+// ---- 回転と、文字の等倍の拡大縮小（A30・A31）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let rotIds = [
+        "H7 move tool: click a rect, drag the rotation handle (above the top edge) a quarter turn clockwise with the real pointer: get reports rotate≈90, and the export shows the rect standing up (top edge moved from y=100 to y=50); Cmd+Z restores",
+        "H8 a freehand (pen) stroke rotates around the centre of its bounds: get reports the points turned 90° clockwise",
+        "H9 a rect created with `rotate:90` in a draw op keeps its rotation when moved with the real pointer: get reports x moved by 40 and rotate still 90",
+        "H10 text: dragging the bottom-right corner scales the font by the width ratio (aspect kept, x3 → fontSize≈54), the top-left stays; Cmd+Z restores",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func firstItem(_ op: String) -> [String: Any]? { agentGet()?.items.first(where: { $0["op"] as? String == op }) }
+    func pairOf(_ v: Any?) -> (Double, Double)? { guard let a = v as? [Any], a.count == 2, let x = numOf(a[0]), let y = numOf(a[1]) else { return nil }; return (x, y) }
+    let drawn = agentDraw(##"{"op":"rect","x":100,"y":100,"w":200,"h":100,"color":"#000000"}"##)   // 背景は、赤と青緑の画像：暗い画素で見る
+    if drawn.0 != 0 {
+        for id in rotIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
+    } else if keyGuard(pid, app) != nil {
+        for id in rotIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == 6, selectTool(Seg.move) {
+        // H7：四角（中心 (200,150)）。回転の取っ手は、上辺の中央の 24 pt 上＝(200, 76)。右へ（時計回りに 90°）
+        let selected = click(pt(200, 150))
+        let rotated = drag(line(pt(200, 76), pt(300, 150)), pid: pid)
+        let rect = firstItem("rect")
+        let degrees = rect.flatMap { numOf($0["rotate"]) }
+        let export = agentExportRep()
+        if selected, rotated, let degrees, let export {
+            let topNow = isDark(at(export.rep, 200, 50)), oldTopGone = !isDark(at(export.rep, 200, 100))
+            let box = rect.flatMap { r in (numOf(r["x"]), numOf(r["y"]), numOf(r["w"]), numOf(r["h"])) }
+            let boxKept = box.map { $0.0 == 100 && $0.1 == 100 && $0.2 == 200 && $0.3 == 100 } ?? false
+            key(6, .maskCommand)
+            let back = firstItem("rect").flatMap { numOf($0["rotate"]) }
+            rec(rotIds[0], (abs(degrees - 90) <= 2 && topNow && oldTopGone && boxKept && back == 0) ? "pass" : "fail",
+                "rotate=\(degrees) (expect ≈90); dark at the new top edge (200,50)=\(topNow); old top edge (200,100) no longer dark=\(oldTopGone); x,y,w,h unchanged=\(boxKept); after Cmd+Z rotate=\(String(describing: back))")
+        } else { rec(rotIds[0], "blocked", "click/drag guard refused or get/export failed (selected=\(selected) rotated=\(rotated))") }
+
+        // H8：フリーハンド（3 点）。外接する範囲の中心 (150,125) を軸に 90°。取っ手は (150, 76)
+        _ = runCLI(["clear"])
+        agentDraw(##"{"op":"pen","points":[[100,100],[200,100],[200,150]],"color":"#0000ff"}"##)
+        _ = click(pt(20, 20))
+        let penPicked = click(pt(150, 125))
+        let penTurned = drag(line(pt(150, 76), pt(250, 125)), pid: pid)
+        let points = (firstItem("pen")?["points"] as? [Any])?.compactMap { pairOf($0) } ?? []
+        if penPicked, penTurned, points.count == 3 {
+            let expected: [(Double, Double)] = [(175, 75), (175, 175), (125, 175)]
+            let ok = zip(points, expected).allSatisfy { abs($0.0 - $1.0) <= 2 && abs($0.1 - $1.1) <= 2 }
+            rec(rotIds[1], ok ? "pass" : "fail", "points after the quarter turn=\(points) (expect ≈\(expected))")
+        } else { rec(rotIds[1], "blocked", "guard refused or the pen points are unavailable (picked=\(penPicked) turned=\(penTurned) points=\(points.count))") }
+
+        // H9：回した四角（H7 と同じ 90°。ただし、今度は、取り消さずに動かす）。元の枠の中心を掴んで 40 pt 右へ
+        _ = runCLI(["clear"])
+        agentDraw(##"{"op":"rect","x":100,"y":100,"w":200,"h":100,"color":"#ff0000","rotate":90}"##)
+        _ = click(pt(20, 20))
+        let movedRect = drag(line(pt(200, 150), pt(240, 150)), pid: pid)
+        if movedRect, let r = firstItem("rect"), let x = numOf(r["x"]), let deg = numOf(r["rotate"]) {
+            rec(rotIds[2], (abs(x - 140) <= 2 && deg == 90) ? "pass" : "fail", "x after moving 40 pt right=\(x) (expect ≈140); rotate=\(deg) (expect 90, passed as `rotate` in the draw op)")
+        } else { rec(rotIds[2], "blocked", "drag guard refused or get failed (moved=\(movedRect))") }
+
+        // H10：文字（18 pt）。枠は、アプリと同じ式で測る（`ceil(boundingRect)`）。右下の角を、横へ 3 倍の位置へ
+        _ = runCLI(["clear"])
+        agentDraw(##"{"op":"text","x":100,"y":100,"text":"Hello","fontSize":18,"color":"#000000"}"##)
+        let measured = NSAttributedString(string: "Hello", attributes: [.font: NSFont.systemFont(ofSize: 18, weight: .medium)])
+            .boundingRect(with: CGSize(width: 1e5, height: 1e5), options: [.usesLineFragmentOrigin])
+        let tw = ceil(measured.width), th = ceil(measured.height)
+        _ = click(pt(20, 20))
+        let textPicked = click(pt(100 + tw / 2, 100 + th / 2))
+        let textScaled = drag(line(pt(100 + tw, 100 + th), pt(100 + tw * 3, 100 + th)), pid: pid)
+        if textPicked, textScaled, let t = firstItem("text"), let size = numOf(t["fontSize"]), let x = numOf(t["x"]), let y = numOf(t["y"]) {
+            key(6, .maskCommand)
+            let back = firstItem("text").flatMap { numOf($0["fontSize"]) }
+            rec(rotIds[3], (abs(size - 54) <= 4 && x == 100 && y == 100 && back == 18) ? "pass" : "fail",
+                "fontSize after dragging the corner to x3 width=\(size) (expect ≈54; aspect kept, height not used); top-left=(\(x),\(y)) (expect 100,100); after Cmd+Z fontSize=\(String(describing: back)); measured box=\(tw)x\(th)")
+        } else { rec(rotIds[3], "blocked", "guard refused or get failed (picked=\(textPicked) scaled=\(textScaled))") }
+        _ = selectTool(Seg.pen)
+        _ = runCLI(["clear"])
+    } else { for id in rotIds { rec(id, "blocked", "tool select failed") } }
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)

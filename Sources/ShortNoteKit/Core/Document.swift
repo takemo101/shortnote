@@ -55,33 +55,87 @@ struct Document {
         )
     }
 
-    /// `index` の要素が、`base`（動かす前の文書）から動いているか。動かせる範囲の上限で止まって、動かなかったときは `false`。
-    func hasMovedItem(at index: Int, since base: Document) -> Bool {
+    /// `index` の要素が、`base`（動かす前の文書）から変わっているか（位置・形・回転角・文字の大きさ）。動かせる範囲の上限で止まって、動かなかったときは `false`。
+    func hasChangedItem(at index: Int, since base: Document) -> Bool {
         guard items.indices.contains(index), base.items.indices.contains(index) else { return false }
-        return items[index].bounds != base.items[index].bounds
+        return !items[index].hasSameGeometry(as: base.items[index])
     }
 
-    /// `index` の要素の、大きさを変えるときの形と規則。変えられない要素（ペン・文字）・範囲外・背景画像（要素ではない）は `nil`。
-    func resizeTarget(at index: Int) -> ItemResize.Target? {
+    /// `index` の要素（回したあと）の掴める範囲（外接する範囲＋4 pt）が、キャンバスの中に残る長さが、軸ごとに、
+    /// `min(16 pt, 範囲の長さ, `base`（回す前）でキャンバスの中にあった分)` を下回らないか。移動と同じ規則（`limited`）を、回転にも当てる
+    /// （回して、キャンバスの外へ出てしまい、掴めなくなるのを防ぐ）。
+    func keepsGrabArea(at index: Int, since base: Document, in canvas: CGRect) -> Bool {
+        guard items.indices.contains(index), base.items.indices.contains(index) else { return true }
+        let area = items[index].bounds.insetBy(dx: -Self.grabSlop, dy: -Self.grabSlop)
+        let old = base.items[index].bounds.insetBy(dx: -Self.grabSlop, dy: -Self.grabSlop)
+        func inside(_ a0: CGFloat, _ length: CGFloat, _ c0: CGFloat, _ c1: CGFloat) -> CGFloat { max(0, min(a0 + length, c1) - max(a0, c0)) }
+        let x = inside(area.minX, area.width, canvas.minX, canvas.maxX), oldX = inside(old.minX, old.width, canvas.minX, canvas.maxX)
+        let y = inside(area.minY, area.height, canvas.minY, canvas.maxY), oldY = inside(old.minY, old.height, canvas.minY, canvas.maxY)
+        return x >= min(Self.keptInCanvas, area.width, oldX) - 1e-9 && y >= min(Self.keptInCanvas, area.height, oldY) - 1e-9
+    }
+
+    /// `index` の要素の、取っ手の操作（大きさの変更・回転）に使う形と規則。範囲外・背景画像（要素ではない）は `nil`。
+    /// ペンは、点の外接する範囲（線の太さを含めない）だけを持つ（大きさの取っ手は無い）。
+    func resizeTarget(at index: Int) -> ItemHandles.Target? {
         guard items.indices.contains(index) else { return nil }
-        switch items[index].content {
-        case .image(_, let box): return ItemResize.Target(shape: .box(box), keepsAspect: true, minSide: ItemResize.imageMinSide)
-        case .ellipse(let rect), .rect(let rect): return ItemResize.Target(shape: .box(rect), keepsAspect: false, minSide: ItemResize.shapeMinSide)
-        case .line(let from, let to): return ItemResize.Target(shape: .line(from: from, to: to), keepsAspect: false, minSide: 0)
-        case .pen, .text: return nil
+        let item = items[index]
+        switch item.content {
+        case .image(_, let box):
+            return ItemHandles.Target(kind: .image, shape: .box(box, rotation: item.rotation), keepsAspect: true, minSide: ItemHandles.imageMinSide)
+        case .ellipse(let rect):
+            return ItemHandles.Target(kind: .ellipse, shape: .box(rect, rotation: item.rotation), keepsAspect: false, minSide: ItemHandles.shapeMinSide)
+        case .rect(let rect):
+            return ItemHandles.Target(kind: .rect, shape: .box(rect, rotation: item.rotation), keepsAspect: false, minSide: ItemHandles.shapeMinSide)
+        case .text(_, let box):
+            return ItemHandles.Target(kind: .text, shape: .box(box, rotation: item.rotation), keepsAspect: true, minSide: ItemHandles.shapeMinSide)
+        case .line(let from, let to):
+            return ItemHandles.Target(kind: .line, shape: .line(from: from, to: to), keepsAspect: false, minSide: 0)
+        case .pen(let points):
+            guard let first = points.first else { return nil }
+            var minX = first.point.x, maxX = minX, minY = first.point.y, maxY = minY
+            for p in points {
+                minX = min(minX, p.point.x); maxX = max(maxX, p.point.x)
+                minY = min(minY, p.point.y); maxY = max(maxY, p.point.y)
+            }
+            return ItemHandles.Target(kind: .pen, shape: .stroke(frame: CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)), keepsAspect: false, minSide: 0)
         }
     }
 
-    /// `index` の要素の形を `shape` にしたものを返す（色・太さ・塗りつぶしは、そのまま）。要素の種類と形が合わないときは `nil`。
-    func applying(_ shape: ItemResize.Shape, toItemAt index: Int) -> Document? {
+    /// `index` の要素の形（と回転角）を `shape` にしたものを返す（色・太さ・塗りつぶしは、そのまま）。文字では、`fontSize` があれば、文字の大きさも変える。
+    /// 要素の種類と形が合わないとき（ペンなど）は `nil`。
+    func applying(_ shape: ItemHandles.Shape, fontSize: CGFloat? = nil, toItemAt index: Int) -> Document? {
         guard items.indices.contains(index) else { return nil }
         var copy = self
         switch (items[index].content, shape) {
-        case (.image(let image, _), .box(let box)): copy.items[index].content = .image(image, box: box)
-        case (.ellipse, .box(let box)): copy.items[index].content = .ellipse(box)
-        case (.rect, .box(let box)): copy.items[index].content = .rect(box)
-        case (.line, .line(let from, let to)): copy.items[index].content = .line(from: from, to: to)
+        case (.image(let image, _), .box(let box, let angle)):
+            copy.items[index].content = .image(image, box: box); copy.items[index].rotation = angle
+        case (.ellipse, .box(let box, let angle)):
+            copy.items[index].content = .ellipse(box); copy.items[index].rotation = angle
+        case (.rect, .box(let box, let angle)):
+            copy.items[index].content = .rect(box); copy.items[index].rotation = angle
+        case (.text(let text, _), .box(let box, let angle)):
+            copy.items[index].content = .text(text, box: box); copy.items[index].rotation = angle
+            if let fontSize { copy.items[index].size = fontSize }
+        case (.line, .line(let from, let to)):
+            copy.items[index].content = .line(from: from, to: to)
         default: return nil
+        }
+        return copy
+    }
+
+    /// `index` の要素を、中心（直線は中点、ペンは点の外接する範囲の中心。そのほかは枠の中心）を軸に、`angle`（時計回りが正）だけ回したものを返す。
+    /// 円・四角・画像・文字は、回転角を足す（元の枠は変えない）。直線・ペンは、点そのものを回す。範囲外なら `nil`。
+    func rotating(itemAt index: Int, by angle: CGFloat) -> Document? {
+        guard items.indices.contains(index), let target = resizeTarget(at: index) else { return nil }
+        var copy = self
+        let center = ItemHandles.center(of: target.shape)
+        switch items[index].content {
+        case .pen(let points):
+            copy.items[index].content = .pen(points: points.map { StrokePoint(point: ItemHandles.rotate($0.point, about: center, by: angle), pressure: $0.pressure) })
+        case .line(let from, let to):
+            copy.items[index].content = .line(from: ItemHandles.rotate(from, about: center, by: angle), to: ItemHandles.rotate(to, about: center, by: angle))
+        case .ellipse, .rect, .text, .image:
+            copy.items[index].rotation = ItemHandles.normalized(items[index].rotation + angle)
         }
         return copy
     }

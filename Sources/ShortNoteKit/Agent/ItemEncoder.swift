@@ -25,16 +25,19 @@ enum ItemEncoder {
             out["color"] = hex(item.color)
             out["fill"] = item.filled
             out["size"] = number(item.size)
+            out["rotate"] = degrees(item.rotation)
         case .text(let text, let box):
             out["op"] = "text"
             out["x"] = number(box.minX); out["y"] = number(box.minY)
             out["text"] = text
             out["color"] = hex(item.color)
             out["fontSize"] = number(item.size)
+            out["rotate"] = degrees(item.rotation)
         case .image(_, let box):
             out["op"] = "image"
             out["x"] = number(box.minX); out["y"] = number(box.minY)
             out["w"] = number(box.width); out["h"] = number(box.height)
+            out["rotate"] = degrees(item.rotation)
         }
         return out
     }
@@ -42,6 +45,12 @@ enum ItemEncoder {
     /// `{"x":..,"y":..,"w":..,"h":..}`（背景の枠）。
     static func rect(_ rect: CGRect) -> [String: Any] {
         ["x": number(rect.minX), "y": number(rect.minY), "w": number(rect.width), "h": number(rect.height)]
+    }
+
+    /// 回転角（度。時計回りが正。`-180` より大きく `180` 以下）。
+    static func degrees(_ radians: CGFloat) -> NSDecimalNumber {
+        let d = number(ItemHandles.normalized(radians) * 180 / .pi)
+        return d.doubleValue == -180 ? 180 : d   // 小数 3 桁に丸めたとき、-180 になる誤差を、180 にする
     }
 
     /// これより大きい（小さい）数は、この値に丸める。`String(format:)`・`NSDecimalNumber` は、1e166 を超えると NaN になり、
