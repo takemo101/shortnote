@@ -37,6 +37,7 @@ flowchart TD
 |---|---|---|---|
 | `Core/` | `Item` | キャンバスの要素。種類ごとに必要な値だけを持つ（`enum Content`）。範囲（`bounds`）と平行移動 | なし（値型） |
 | | `Document` | 背景画像と要素の配列。追加・移動・クリア（背景は残す）・当たり判定を、新しい値を返す形で行う。消すものが無いクリアは `nil`（履歴に積まない）。移動は、要素の掴める範囲がキャンバスの中に残る長さを、軸ごとに最大 16 pt まで保つよう制限する（`limited`。SPEC §3.2.3）。キャンバスの外へ運んで掴めなくなるのを防ぐ。制限で動かなかったドラッグは、履歴に積まない（`hasMovedItem`） | 値型 |
+| | `ImageResize` | 画像の角の取っ手をドラッグしたときの、新しい枠の計算（反対側の角を固定。縦横比を保つ／自由。短い辺は 8 pt 以上。反対側の角を越えると、反対向きに伸びる）と、取っ手の掴める範囲の判定。`Document.resizingImage`・`imageBox` が、画像だけに適用する（SPEC §3.2.3） | なし（純粋な計算） |
 | | `History<State>` | 取り消し・やり直し。積む・戻す・やり直す、200 段の上限、新しい操作でやり直しを捨てる規則 | 2 つのスタック |
 | | `CanvasSize`、`CanvasSizeStore` | キャンバスのサイズ（書き出しのピクセル数）。`parse` が検証して `Result` を返す。存在する値は常に有効。保存（`UserDefaults`） | なし |
 | | `TextSize` | 文字サイズの、選べる大きさ（12〜96 pt）と既定（18 pt）。ブラシサイズとは別 | なし |
@@ -61,7 +62,7 @@ flowchart TD
 | | `ExportStore` | 書き出し先 `/tmp/shortnote/`、直前のファイルの再利用、`ExportError`（生成失敗・書込み失敗） | `cachedURL` |
 | | `GlobalHotKey` | Carbon の `RegisterEventHotKey`（アクセシビリティ権限が要らない）で全域ショートカットを登録。登録し直せる | 登録参照、ハンドラ（static） |
 | | `KeyboardLayout` | 現在のキーボード配列（US・JIS など）で、物理キー 0〜127 が出す文字の対応表を、1 度だけ引いて返す（`UCKeyTranslate`。メインスレッドで使う）。`[` `]` の既定のキーを決めるのに使う | なし |
-| `UI/` | `CanvasView` | ポインタ入力を `Document` の変更につなぐ。履歴を持ち、描画は `CanvasRenderer` に任せる | `Document`、`History`、描画中の要素、移動中の一時状態、ツール・色・太さ・透過 |
+| `UI/` | `CanvasView` | ポインタ入力を `Document` の変更につなぐ。履歴を持ち、描画は `CanvasRenderer` に任せる。移動ツールで選ばれた画像の、点線の枠と四隅の取っ手は、`draw(_:)` だけで描く（書き出しには入らない） | `Document`、`History`、描画中の要素、移動・拡大縮小中の一時状態（`move`・`resizing`）、選ばれた画像（`selectedImage`）、ツール・色・太さ・透過 |
 | | `InlineTextEditor` | キャンバス上の文字入力欄。確定した文字を `Entry` で返す | 入力中の `NSTextView` |
 | | `PaintPanel` | キー入力を先に受けて `keyHandler` に渡す（メニューバーを持たないアプリのため） | なし |
 | | `PaintWindowController` | パネルの組み立て、`perform(Command)`（ツールバーもキーも同じ経路）、画像の選択、パスのコピー、書き出し | `ExportStore`、位置決め済みか |
@@ -92,6 +93,7 @@ flowchart TD
 
 - 描画内容は `CanvasView` だけが持つ。`Document` の値コピーを `History` に積むので、取り消し／やり直しは「直前の `Document` へ戻す」操作になる。画像の読み込み・貼り付け・ドロップ・文字・移動も同じ履歴に入る。
 - 位置の移動は、移動前の `Document`（`base`）から平行移動した複製を作り直して置き換える。ドラッグが終わって初めて履歴に積む（途中の位置は履歴に残さない）。
+- 画像の拡大縮小も、移動と同じ形：ドラッグ中は `move.base`（拡大前の `Document`）から、枠を計算し直した複製を `document` に置く。ドラッグが終わって、枠が変わっていれば、1 段だけ履歴に積む。エージェントが途中で足した要素は、移動と同じく `move.base` にも足す。選び（`selectedImage`）は保存せず、取り消し・やり直し・クリア・ツールの切り替えで外す。
 - 書き出しの再利用は `ExportStore` が持つ。`CanvasView.onChange`（書き出し結果が変わる操作）で `invalidate()` する。
 - キャンバスのサイズ（標準 960×640 px、プリセット、数値）は `CanvasSizeStore` が `UserDefaults`（`canvasWidthPx`・`canvasHeightPx`）に保存する。サイズは、書き出すピクセル数を 2 で割ったポイント数として、ウィンドウを作る時点（`PaintWindowController.init`）で適用する（画像つきで起動したときも、背景の配置が、そのキャンバスの大きさで決まる）。保存値は `CanvasSize.fitting` で今の画面に収まるよう縮めてから適用する（保存値は変えない）。適用は、ウィンドウの左上を動かさずに、キャンバスがちょうどその大きさになるよう、枠の分を足して大きさを決める。メニューは `StatusMenu` が組み、開くたびに `menuNeedsUpdate` で保存中のサイズにチェックを付ける。
 - ショートカットの割り当ては `ShortcutCenter` が持つ。変更のたびに `KeyBindingsStore` が保存し、`AppDelegate`（全域キーの登録し直し、メニューの表示）、`PaintWindowController`（ツールチップ）、設定ウィンドウ（一覧）へ `onChange` で知らせる。キーを記録している間は `isRecording` が真で、全域ホットキーは外す（記録するキーが先に奪われないように）。
