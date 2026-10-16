@@ -45,6 +45,7 @@ enum OpsParser {
 
     static func parse(_ data: Data) -> Result<[Op], AgentError> {
         guard data.count <= maxBytes else { return .failure(.invalid("要求が大きすぎます（1 MiB まで）")) }
+        guard !data.contains(0), String(data: data, encoding: .utf8) != nil else { return .failure(.invalid("UTF-8 の JSON でなければなりません（UTF-16 などは使えません）")) }
         guard let json = try? JSONSerialization.jsonObject(with: data) else { return .failure(.invalid("JSON として読めません")) }
         guard let root = json as? [String: Any] else { return .failure(.invalid("JSON のいちばん外は、オブジェクト（{\"version\": 1, \"ops\": [...]}）でなければなりません")) }
         if let unknown = root.keys.filter({ !["version", "ops"].contains($0) }).sorted().first {

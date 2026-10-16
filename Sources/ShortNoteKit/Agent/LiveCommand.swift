@@ -55,7 +55,7 @@ enum LiveCommand {
             body = encoded
         }
         body = Data(body.map { $0 == 0x0A || $0 == 0x0D ? 0x20 : $0 })
-        guard body.count <= OpsParser.maxBytes else { return .failure(.invalid("要求が大きすぎます（1 MiB まで。画像のパスを絶対パスにしたあとの大きさ）")) }
+        guard body.count <= OpsParser.maxBytes else { return .failure(.invalid("要求が大きすぎます（1 MiB まで）。相対パスの画像があると、数が長い形に書き直されて大きくなります。画像のパスを、絶対パスで書くと、元の大きさのまま送れます")) }
         return .success(Request(line: "draw " + String(decoding: body, as: UTF8.self), launchesApp: true))
     }
 }

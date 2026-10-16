@@ -178,4 +178,22 @@ struct ItemEncoderTests {
         }
         #expect(!text.contains("0000000"))
     }
+
+    @Test("桁外れ・無限大・NaN の値でも、get の返事は、有効な JSON になる（NaN を JSONSerialization に渡すと、例外で、アプリが落ちる）")
+    func extremeValuesStayValidJSON() throws {
+        for v in [1e200, -1e200, 1e300, .infinity, -.infinity, .nan] as [CGFloat] {
+            let n = ItemEncoder.number(v)
+            #expect(n != NSDecimalNumber.notANumber, "\(v)")
+            #expect(JSONSerialization.isValidJSONObject(["x": n]), "\(v)")
+        }
+        #expect(ItemEncoder.number(1e200).stringValue == "1000000000000")
+        // 画像の w・h には上限がない：実際の get の経路で、落ちない
+        let context = try #require(CGContext(data: nil, width: 2, height: 2, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = ImportedImage(cgImage: try #require(context.makeImage()), pointSize: CGSize(width: 2, height: 2))
+        let canvas = FakeCanvas()
+        canvas.snapshot = AgentSnapshot(size: CGSize(width: 480, height: 320), background: nil, editing: false,
+                                        items: [Item(content: .image(image, box: CGRect(x: 0, y: 0, width: 1e200, height: 10)), color: CGColor(gray: 0, alpha: 1), size: 0)])
+        let reply = try object(AgentService(canvas: canvas).handle(Data("get".utf8)))
+        #expect(((reply["items"] as? [[String: Any]])?.first?["w"] as? NSNumber)?.doubleValue == 1e12)
+    }
 }

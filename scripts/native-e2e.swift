@@ -1267,9 +1267,9 @@ if proc.isRunning {
         NSRunningApplication(processIdentifier: pid3)?.terminate()
         let exited = wait(5) { !p3.isRunning }
         let removed = !FileManager.default.fileExists(atPath: agentSocketPath)
-        rec(agentIds[11], (before && exited && removed) ? "pass" : "fail", "socket file existed before the quit=\(before); app exited within 5 s=\(exited); socket file removed=\(removed)")
+        if agentSocketPath.utf8.count <= 103 { rec(agentIds[11], (before && exited && removed) ? "pass" : "fail", "socket file existed before the quit=\(before); app exited within 5 s=\(exited); socket file removed=\(removed)") }
         if p3.isRunning { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
-    } else { rec(agentIds[11], "blocked", "the relaunched candidate could not be identified by its start time") }
+    } else if agentSocketPath.utf8.count <= 103 { rec(agentIds[11], "blocked", "the relaunched candidate could not be identified by its start time") }
     // G10：アプリが動いていないとき、draw が起動する（フォーカスを奪わない）
     if agentSocketPath.utf8.count <= 103, let o = prevFront, o.processIdentifier != pid {
         _ = wait(3) { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty }

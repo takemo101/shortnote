@@ -17,9 +17,10 @@ enum OpsApply {
     /// ファイルから画像を読む（`ImageIntake` と同じ形式。PDF の最初のページを含む）。読めなければ `nil`。
     /// 普通のファイルだけを読む（名前つきパイプやデバイスを指されても、読み込みで固まらない。シンボリックリンクは、先を見る）。
     static let loadFromDisk: (String) -> ImportedImage? = { path in
+        let url = URL(fileURLWithPath: path)   // `~` を展開する（読み込みと、同じパスを見る）
         var info = stat()
-        guard stat(path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
-        if case .success(let image) = ImageIntake.image(at: URL(fileURLWithPath: path)) { return image }
+        guard stat(url.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG else { return nil }
+        if case .success(let image) = ImageIntake.image(at: url) { return image }
         return nil
     }
 

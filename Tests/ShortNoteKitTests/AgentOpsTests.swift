@@ -33,6 +33,18 @@ struct OpsParserTests {
         for bad in ["red", "#12345", "#1234567", "000000", "#GG0000", "#"] { #expect(RGBA(hex: bad) == nil, "\(bad)") }
     }
 
+    @Test("UTF-8 だけ：UTF-16（BOM あり・なし）と NUL は断る。UTF-8 の BOM は通る")
+    func onlyUTF8() throws {
+        let json = wrap(#"{"op":"text","x":1,"y":2,"text":"aé"}"#)
+        let utf16le = Data([0xFF, 0xFE]) + (try #require(json.data(using: .utf16LittleEndian)))
+        let utf16beNoBOM = try #require(json.data(using: .utf16BigEndian))
+        for data in [utf16le, utf16beNoBOM, Data(json.utf8) + Data([0])] {
+            guard case .failure(let error) = OpsParser.parse(data) else { Issue.record("通ってしまった：\(data.prefix(4).map { $0 })"); continue }
+            #expect(error.code == .invalidOps)
+        }
+        #expect(try OpsParser.parse(Data([0xEF, 0xBB, 0xBF]) + Data(json.utf8)).get().count == 1)
+    }
+
     @Test("範囲の外の座標は、エラーにしない（丸めるのは、適用のとき）")
     func outOfRangeCoordinatesAreAccepted() throws {
         let ops = try parse(wrap("""

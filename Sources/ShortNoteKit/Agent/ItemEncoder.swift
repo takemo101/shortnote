@@ -43,9 +43,16 @@ enum ItemEncoder {
         ["x": number(rect.minX), "y": number(rect.minY), "w": number(rect.width), "h": number(rect.height)]
     }
 
+    /// これより大きい（小さい）数は、この値に丸める。`String(format:)`・`NSDecimalNumber` は、1e166 を超えると NaN になり、
+    /// `JSONSerialization` は、NaN・無限大を書くと、例外を投げる（捕まえられず、アプリが落ちる）。画像の `w`・`h` には、上限がない。
+    static let numberLimit = 1e12
+
     /// 小数 3 桁に丸めた数（`-0` は `0`）。`NSDecimalNumber` なので、JSON に、丸めた桁だけが出る（`Double` のままだと、`10.3` が `10.300000000000001` と出る）。
+    /// 有限でない値は 0、絶対値が `numberLimit` を超える値は、その値に丸める（JSON に、NaN・無限大を出さない）。
     static func number(_ value: CGFloat) -> NSDecimalNumber {
-        let rounded = (Double(value) * 1000).rounded() / 1000 + 0
+        let v = Double(value)
+        guard v.isFinite else { return 0 }
+        let rounded = (min(max(v, -numberLimit), numberLimit) * 1000).rounded() / 1000 + 0
         return NSDecimalNumber(string: String(format: "%.3f", rounded), locale: Locale(identifier: "en_US_POSIX"))
     }
 
