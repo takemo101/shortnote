@@ -15,6 +15,7 @@ final class CanvasView: NSView {
         didSet {
             commitEditing()
             selectedItem = nil
+            marquee = nil   // 範囲選択の途中で、ツールを替えたら、捨てる
             window?.invalidateCursorRects(for: self)
         }
     }
@@ -47,10 +48,19 @@ final class CanvasView: NSView {
     private var dragStart = CGPoint.zero
     /// 移動ツールで、動かしている要素の番号と、動かし始める前の文書。
     private var move: (index: Int, base: Document)?
-    /// 移動ツールで選ばれている要素の番号（背景画像以外の、どの要素も選べる）。取っ手が出る（SPEC §3.2.3）。保存しない。
-    private(set) var selectedItem: Int? {
-        didSet { if oldValue != selectedItem { needsDisplay = true } }
+    /// 移動ツールで選ばれている要素の番号（小さい順。背景画像以外の、どの要素も選べる。範囲選択で複数になる）。保存しない。SPEC §3.2.3。
+    private(set) var selectedItems: [Int] = [] {
+        didSet { if oldValue != selectedItems { needsDisplay = true } }
     }
+    /// 選びが 1 つのときの、その要素の番号（取っ手が出る）。複数・なしのときは `nil`。入れると、その 1 つだけの選びになる（`nil` で、選びなし）。
+    private(set) var selectedItem: Int? {
+        get { selectedItems.count == 1 ? selectedItems[0] : nil }
+        set { selectedItems = newValue.map { [$0] } ?? [] }
+    }
+    /// 選びが 2 つ以上のとき、まとめて動かしている要素の番号（`move` と同時に立つ）。1 つを動かしているときは `nil`。
+    private var moveGroup: [Int]?
+    /// 範囲選択の、ドラッグの始点と、いまの位置（キャンバスの座標）。
+    private var marquee: (start: CGPoint, current: CGPoint)?
     /// 取っ手をドラッグしているもの、掴んだ位置から取っ手までの差、掴んだ位置の角度（回転の取っ手のとき。軸から見た向き）。`move` と同時に立つ。
     private var resizing: (handle: ItemHandles.Handle, offset: CGSize, startAngle: CGFloat)?
     private lazy var editor: InlineTextEditor = {
@@ -153,6 +163,8 @@ final class CanvasView: NSView {
         }
         draft = nil
         move = nil
+        moveGroup = nil
+        marquee = nil
         resizing = nil
     }
 
@@ -165,7 +177,7 @@ final class CanvasView: NSView {
     var committedDocument: Document { move?.base ?? document }
 
     /// 人が、文字の入力か、ドラッグ（描く・動かす）の途中か。
-    var isInteracting: Bool { editor.isActive || draft != nil || move != nil }
+    var isInteracting: Bool { editor.isActive || draft != nil || move != nil || marquee != nil }
 
     /// 要素を、手前に足す。取り消しの 1 段（確定した順）。ドラッグ中の線・図形と、入力中の文字は続き、確定したとき、これらの上に重なる。
     /// 移動のドラッグ中は、動かす前の文書（`move.base`）にも足す。足さないと、次のドラッグ操作で `document` が作り直されたとき、消える。
@@ -189,6 +201,7 @@ final class CanvasView: NSView {
         let base = committedDocument
         guard let cleared = base.clearingItems() else { return false }
         move = nil
+        moveGroup = nil
         resizing = nil
         selectedItem = nil
         history.record(previous: base)
@@ -272,6 +285,7 @@ final class CanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         commitEditing()
+        marquee = nil       // 前の範囲選択が、離す操作を受けずに残っていたら、捨てる（次のドラッグを、乗っ取らないように）
         let p = location(event)
         dragStart = p
         switch tool {
@@ -290,12 +304,19 @@ final class CanvasView: NSView {
                let at = ItemHandles.point(of: handle, in: target.shape, canvas: bounds) {
                 move = (index, document)
                 resizing = (handle, CGSize(width: at.x - p.x, height: at.y - p.y), ItemHandles.angle(from: ItemHandles.center(of: target.shape), to: p))
-            } else if let index = document.topItemIndex(at: p) {
+            } else if !event.modifierFlags.contains(.shift), let index = document.topItemIndex(at: p) {
                 move = (index, document)
-                selectedItem = document.resizeTarget(at: index) != nil ? index : nil
+                if selectedItems.count > 1, selectedItems.contains(index) {
+                    moveGroup = selectedItems                       // 選ばれた要素の、どれかを掴んだ：全部、一緒に動く
+                } else {
+                    moveGroup = nil
+                    selectedItem = document.resizeTarget(at: index) != nil ? index : nil
+                }
                 NSCursor.closedHand.set()
             } else {
-                selectedItem = nil
+                // 何もない所（または、Shift つきで始めた）：範囲選択。選びは、いったん外す
+                selectedItems = []
+                marquee = (p, p)
             }
         }
         needsDisplay = true
@@ -303,6 +324,11 @@ final class CanvasView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let p = location(event)
+        if marquee != nil {
+            marquee?.current = p
+            needsDisplay = true
+            return
+        }
         if let move {
             if let resizing, let target = move.base.resizeTarget(at: move.index) {
                 if resizing.handle == .rotate {
@@ -341,6 +367,12 @@ final class CanvasView: NSView {
                 needsDisplay = true
                 return
             }
+            if let group = moveGroup {
+                guard let moved = move.base.translatingItems(at: group, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
+                document = moved
+                needsDisplay = true
+                return
+            }
             guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
             document = moved
             needsDisplay = true
@@ -364,11 +396,22 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let area = marquee {
+            // 範囲選択を終える：外接する範囲が、範囲にすっぽり入っている要素を選ぶ（取り消しの段にはならない）
+            marquee = nil
+            let rect = CGRect(x: min(area.start.x, area.current.x), y: min(area.start.y, area.current.y),
+                              width: abs(area.current.x - area.start.x), height: abs(area.current.y - area.start.y))
+            selectedItems = document.itemIndices(containedIn: rect, canvas: bounds)
+            needsDisplay = true
+            return
+        }
         if let finished = move {
+            let group = moveGroup
             move = nil
+            moveGroup = nil
             resizing = nil
             window?.invalidateCursorRects(for: self)
-            if document.hasChangedItem(at: finished.index, since: finished.base) {   // 上限で止まって動かなかったドラッグ、変わらなかった取っ手の操作は、取り消しの段にしない
+            if document.hasChangedItems(at: group ?? [finished.index], since: finished.base) {   // 上限で止まって動かなかったドラッグ、変わらなかった取っ手の操作は、取り消しの段にしない
                 history.record(previous: finished.base)
                 changed()
             }
@@ -441,6 +484,7 @@ final class CanvasView: NSView {
         ctx.setLineWidth(1)
         ctx.stroke(bounds.insetBy(dx: 0.5, dy: 0.5))
         drawSelectionHandles(in: ctx)
+        drawMultiSelection(in: ctx)
     }
 
     /// 選ばれた要素の取っ手。点線の枠（画像・円・四角・文字は、回した向きのまま。ペンは外接する範囲）、大きさの取っ手（四隅、直線は両端）、
@@ -483,6 +527,33 @@ final class CanvasView: NSView {
             let square = CGRect(x: p.x - s / 2, y: p.y - s / 2, width: s, height: s)
             ctx.fill(square)
             ctx.stroke(square)
+        }
+    }
+
+    /// 2 つ以上選ばれているとき：それぞれの点線の枠と、全体を囲む点線の枠（大きさ・回転の取っ手は無い）。範囲選択の途中は、範囲の枠と薄い色。
+    /// 画面だけの表示で、書き出し（`renderPNG`）には入らない。
+    private func drawMultiSelection(in ctx: CGContext) {
+        guard tool == .move else { return }
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        let accent = NSColor.controlAccentColor
+        ctx.setStrokeColor(accent.cgColor)
+        ctx.setLineWidth(1)
+        ctx.setLineDash(phase: 0, lengths: [4, 3])
+        let frames = selectedItems.count > 1 ? selectedItems.compactMap { document.items.indices.contains($0) ? document.items[$0].bounds : nil } : []
+        for frame in frames { ctx.stroke(frame) }
+        if let first = frames.first {
+            let all = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -3, dy: -3)
+            ctx.setLineWidth(1.5)
+            ctx.stroke(all)
+        }
+        if let area = marquee {
+            let rect = CGRect(x: min(area.start.x, area.current.x), y: min(area.start.y, area.current.y),
+                              width: abs(area.current.x - area.start.x), height: abs(area.current.y - area.start.y))
+            ctx.setFillColor(accent.withAlphaComponent(0.08).cgColor)
+            ctx.fill(rect)
+            ctx.setLineWidth(1)
+            ctx.stroke(rect)
         }
     }
 
