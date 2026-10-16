@@ -1222,6 +1222,107 @@ if agentSocketPath.utf8.count > 103 {
     G11state = (bad.0, big.0, beforeBad, afterBad, bigSize, jsonObj(bad.2)?["error"] as? [String: Any])
 }
 
+// ---- 円・四角の塗りつぶし（A27）----
+let fillIds = [
+    "Y1 render: fill:true paints the inside of a rect and an ellipse; outlines and the box corner outside the ellipse stay blank",
+    "Y2 draw with fill:true: get reports fill, and the exported inside differs from before while the outline rect's inside does not",
+    "Y3 the ellipse/rect buttons: a plain press only selects the tool; the menu (AXShowMenu) sets filled / outline per tool and the drawn shapes follow",
+    "Y4 pressing and holding the ellipse button with the real mouse opens the menu (a menu window appears); Esc closes it",
+]
+do {
+    canvasWidthPt = 480
+    let ydir = "\(work)/render"
+    try? FileManager.default.createDirectory(atPath: ydir, withIntermediateDirectories: true)
+    // Y1：render（アプリに触れない）
+    let yOut = "\(ydir)/fill.png"
+    let y1 = runCLI(["render", "-", "-", "-o", yOut], stdin: ##"{"version":1,"ops":[{"op":"rect","x":100,"y":100,"w":120,"h":80,"color":"#ff0000","fill":true},{"op":"ellipse","x":260,"y":100,"w":120,"h":120,"color":"#0000ff","fill":true},{"op":"rect","x":100,"y":220,"w":120,"h":60,"color":"#00aa00"}]}"##)
+    if y1.0 == 0, let rep = load(yOut) {
+        let redIn = at(rep, 160, 140), blueIn = at(rep, 320, 160), corner = at(rep, 262, 102), outlineIn = at(rep, 160, 250)
+        let white = { (p: Px) in p.r > 0.95 && p.g > 0.95 && p.b > 0.95 }
+        rec(fillIds[0], (isRedPx(redIn) && blueIn.b > 0.9 && blueIn.r < 0.1 && white(corner) && white(outlineIn)) ? "pass" : "fail",
+            "rect inside red=\(isRedPx(redIn)); ellipse inside blue=\(blueIn.b > 0.9 && blueIn.r < 0.1); the box corner outside the ellipse blank=\(white(corner)); outline rect inside blank=\(white(outlineIn)); stderr='\(y1.2)'")
+    } else { rec(fillIds[0], "blocked", "render failed: exit=\(y1.0) \(y1.2)") }
+
+    // Y2：draw（常駐中のアプリ）
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    let base = agentExportRep()
+    agentDraw(##"{"op":"rect","x":100,"y":100,"w":120,"h":80,"color":"#ff00ff","fill":true},{"op":"ellipse","x":260,"y":100,"w":120,"h":80,"color":"#ff00ff"}"##)
+    let g2 = agentGet(), after = agentExportRep()
+    if let base, let after, let g2 {
+        let differs = { (x: Double, y: Double) -> Bool in let a = at(base.rep, x, y), b = at(after.rep, x, y); return abs(a.r - b.r) + abs(a.g - b.g) + abs(a.b - b.b) > 0.3 }
+        let fills = g2.items.map { $0["fill"] as? Bool }
+        rec(fillIds[1], (fills == [true, false] && differs(160, 140) && !differs(320, 140)) ? "pass" : "fail",
+            "get fill flags=\(fills) (expect [true, false]); filled rect inside changed=\(differs(160, 140)); outline ellipse inside changed=\(differs(320, 140)) (expect false)")
+    } else { rec(fillIds[1], "blocked", "get or export failed") }
+
+    // Y3：ツールバー（Accessibility）。メニューは AXShowMenu で開き、項目を AXPress する
+    func axRect(_ e: AXUIElement) -> CGRect? {
+        guard let pv = ax(e, "AXPosition"), let sv = ax(e, "AXSize") else { return nil }
+        var p = CGPoint.zero, s = CGSize.zero
+        AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &s)
+        return CGRect(origin: p, size: s)
+    }
+    func fillMenuItem(_ title: String) -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first }
+    func chooseFill(_ seg: Int, _ title: String) -> Bool {
+        AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
+        guard AXUIElementPerformAction(radios[seg], "AXShowMenu" as CFString) == .success || true else { return false }
+        guard wait(3, { fillMenuItem(title) != nil }), let item = fillMenuItem(title) else { return false }
+        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+    }
+    _ = runCLI(["clear"])
+    if keyGuard(pid, app) != nil {
+        rec(fillIds[2], "blocked", "keyboard guard"); rec(fillIds[3], "blocked", "keyboard guard")
+    } else if radios.count == 6, selectTool(Seg.pen) {
+        // 普通に押す：選択だけ。塗りは、まだ枠だけ
+        var ok = selectTool(Seg.ellipse) && drag(line(pt(60, 60), pt(160, 140)), pid: pid)
+        var shots: [NSBitmapImageRep?] = [exportImg()]
+        // 円：塗りつぶしを選ぶ（そのツールに切り替わる）。四角は、枠だけのまま
+        _ = selectTool(Seg.pen)
+        let pickedFill = chooseFill(Seg.ellipse, "塗りつぶし")
+        let toolIsEllipse = wait(2) { (ax(radios[Seg.ellipse], "AXValue") as? NSNumber)?.intValue == 1 }
+        usleep(400_000)   // メニューが閉じるのを待つ（閉じ切る前の最初のクリックは、メニューを閉じるだけになる）
+        ok = ok && drag(line(pt(220, 60), pt(320, 140)), pid: pid)
+        shots.append(exportImg())
+        // 四角：普通に押して描く（枠だけのまま）
+        ok = ok && selectTool(Seg.rect) && drag(line(pt(60, 180), pt(160, 260)), pid: pid)
+        shots.append(exportImg())
+        // 円を、枠だけへ戻して描く
+        _ = selectTool(Seg.pen)
+        let pickedOutline = chooseFill(Seg.ellipse, "枠だけ")
+        _ = wait(2) { (ax(radios[Seg.ellipse], "AXValue") as? NSNumber)?.intValue == 1 }
+        usleep(400_000)
+        ok = ok && drag(line(pt(220, 180), pt(320, 260)), pid: pid)
+        shots.append(exportImg())
+        if let s = shots.last!, ok {
+            let g = agentGet()?.items.map { ($0["op"] as? String ?? "?", $0["fill"] as? Bool ?? false) } ?? []
+            let expected: [(String, Bool)] = [("ellipse", false), ("ellipse", true), ("rect", false), ("ellipse", false)]
+            let same = g.count == 4 && zip(g, expected).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+            let centreDark = [(110.0, 100.0), (270.0, 100.0), (110.0, 220.0), (270.0, 220.0)].map { isDark(at(s, $0.0, $0.1)) }
+            rec(fillIds[2], (pickedFill && toolIsEllipse && pickedOutline && same && centreDark == [false, true, false, false]) ? "pass" : "fail",
+                "menu picks: fill=\(pickedFill) tool switched to ellipse=\(toolIsEllipse) outline=\(pickedOutline); drawn shapes (op, fill)=\(g) (expect ellipse:false, ellipse:true, rect:false, ellipse:false); inside of each shape dark=\(centreDark) (expect false,true,false,false)")
+        } else { rec(fillIds[2], "blocked", "a drag guard refused or an export failed") }
+
+        // Y4：実機のマウスで、円のボタンを押し続ける
+        _ = selectTool(Seg.pen)
+        if let r = axRect(radios[Seg.ellipse]), hitOwner(CGPoint(x: r.midX, y: r.midY)) == pid {
+            let c = CGPoint(x: r.midX, y: r.midY)
+            func menuWindows() -> Int { infos(true).filter { owner($0) == pid && ($0[kCGWindowLayer as String] as? Int ?? 0) >= 100 }.count }
+            let before = menuWindows()
+            post(.mouseMoved, c); post(.leftMouseDown, c)
+            let opened = wait(2.5) { menuWindows() > before }
+            let duringHold = menuWindows()                // ボタンを押している間の、メニューのウィンドウの数
+            let itemsVisible = wait(2) { fillMenuItem("塗りつぶし") != nil && fillMenuItem("枠だけ") != nil }
+            post(.leftMouseUp, c); usleep(300_000)
+            let stillOpen = menuWindows() > before        // ボタンを離しても、メニューは開いたまま（項目を選べる）
+            key(53, [])                                   // Esc でメニューを閉じる
+            let closed = wait(2) { menuWindows() == before }
+            rec(fillIds[3], (opened && itemsVisible && stillOpen && closed) ? "pass" : "fail", "menu windows before=\(before), while holding=\(duringHold) (opened=\(opened)), both menu items in AX=\(itemsVisible), still open after the button was released=\(stillOpen), closed by Esc=\(closed)")
+            _ = selectTool(Seg.pen)
+        } else { rec(fillIds[3], "blocked", "the ellipse button position / pointer guard") }
+    } else { rec(fillIds[2], "blocked", "tool select failed"); rec(fillIds[3], "blocked", "tool select failed") }
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)

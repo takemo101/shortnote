@@ -23,6 +23,7 @@ enum ItemEncoder {
             out["x"] = number(rect.minX); out["y"] = number(rect.minY)
             out["w"] = number(rect.width); out["h"] = number(rect.height)
             out["color"] = hex(item.color)
+            out["fill"] = item.filled
             out["size"] = number(item.size)
         case .text(let text, let box):
             out["op"] = "text"

@@ -19,6 +19,9 @@ final class CanvasView: NSView {
     }
     var color: NSColor = .black
     var brushSize: CGFloat = 4
+    /// 円・四角を、枠だけにするか、塗りつぶすか（円と四角で別々。保存しない。SPEC §3.2.2）。
+    var fillEllipse = false
+    var fillRect = false
     /// 文字サイズ（ブラシサイズとは別）。入力中に変えると、入力中の文字の大きさも変わる。
     var textSize: CGFloat = TextSize.default {
         didSet { editor.setFontSize(textSize) }
@@ -259,9 +262,9 @@ final class CanvasView: NSView {
         case .pen:
             draft = Item(content: .pen(points: [StrokePoint(point: p, pressure: pressure(event))]), color: color.cgColor, size: brushSize)
         case .ellipse:
-            draft = Item(content: .ellipse(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize)
+            draft = Item(content: .ellipse(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillEllipse)
         case .rect:
-            draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize)
+            draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillRect)
         case .line:
             draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize)
         case .text:

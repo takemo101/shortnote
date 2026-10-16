@@ -14,6 +14,10 @@ final class Toolbar: NSObject {
     var onPickImages: (() -> Void)?
     var onCopyPath: (() -> Void)?
     var onClear: (() -> Void)?
+    /// 円・四角の描き方（枠だけ／塗りつぶし）が選ばれた。選んだツールへの切り替えも、`onSelectTool` で別に知らせる。
+    var onSelectFill: ((Tool, Bool) -> Void)?
+    /// 塗りつぶしを選んでいるツール（円・四角）。ボタンの絵とメニューのチェックに使う。保存しない。
+    private var filledTools: Set<Tool> = []
     var fileProvider: (() -> URL?)? {
         get { handle.fileProvider }
         set { handle.fileProvider = newValue }
@@ -58,6 +62,11 @@ final class Toolbar: NSObject {
         )
         control.selectedSegment = 0
         control.refusesFirstResponder = true
+        // 円・四角のボタンに、「枠だけ／塗りつぶし」のメニュー（押し続けると開く。目印が出る）。普通に押すと、ツールの選択だけ。右クリックでは開かない（実験で確認）。
+        for tool in Self.fillTools {
+            control.setMenu(fillMenu(for: tool), forSegment: tool.rawValue)
+            control.setShowsMenuIndicator(true, forSegment: tool.rawValue)
+        }
         return control
     }()
 
@@ -123,6 +132,48 @@ final class Toolbar: NSObject {
 
     /// 表示を、いまの状態に合わせる（キーボードで切り替えたときにも使う）。
     func show(tool: Tool) { tools.selectedSegment = tool.rawValue }
+
+    // MARK: - 円・四角の塗りつぶし
+
+    static let fillTools: [Tool] = [.ellipse, .rect]
+
+    /// ボタンの絵：枠だけは `circle`・`square`、塗りつぶしは `circle.fill`・`square.fill`。
+    private static func symbol(for tool: Tool, filled: Bool) -> String {
+        switch (tool, filled) {
+        case (.ellipse, false): return "circle"
+        case (.ellipse, true): return "circle.fill"
+        case (.rect, false): return "square"
+        case (.rect, true): return "square.fill"
+        default: return ""
+        }
+    }
+
+    private func fillMenu(for tool: Tool) -> NSMenu {
+        let menu = NSMenu(title: tool == .ellipse ? "円" : "四角")
+        for (title, filled) in [("枠だけ", false), ("塗りつぶし", true)] {
+            let item = NSMenuItem(title: title, action: #selector(fillChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = tool.rawValue * 2 + (filled ? 1 : 0)
+            item.image = NSImage(systemSymbolName: Self.symbol(for: tool, filled: filled), accessibilityDescription: title)
+            item.state = filled == filledTools.contains(tool) ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// メニューから選んだ。ボタンの絵とチェックを直し、そのツールに切り替える。
+    @objc private func fillChosen(_ sender: NSMenuItem) {
+        guard let tool = Tool(rawValue: sender.tag / 2), Self.fillTools.contains(tool) else { return }
+        let filled = sender.tag % 2 == 1
+        if filled { filledTools.insert(tool) } else { filledTools.remove(tool) }
+        tools.setImage(NSImage(systemSymbolName: Self.symbol(for: tool, filled: filled), accessibilityDescription: nil), forSegment: tool.rawValue)
+        if let menu = tools.menu(forSegment: tool.rawValue) {
+            for item in menu.items { item.state = (item.tag % 2 == 1) == filled ? .on : .off }
+        }
+        tools.selectedSegment = tool.rawValue
+        onSelectFill?(tool, filled)
+        onSelectTool?(tool)
+    }
     func show(brushSize: CGFloat) { slider.doubleValue = Double(brushSize) }
     func show(textSize: CGFloat) {
         if let index = TextSize.presets.firstIndex(of: textSize) { textSizePopup.selectItem(at: index) }
@@ -139,7 +190,10 @@ final class Toolbar: NSObject {
             return keys.isEmpty ? title : "\(title)（\(keys)）"
         }
         let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("直線", .toolLine), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove)]
-        for (i, entry) in toolCommands.enumerated() { tools.setToolTip(hint(entry.0, entry.1), forSegment: i) }
+        for (i, entry) in toolCommands.enumerated() {
+            let base = hint(entry.0, entry.1)
+            tools.setToolTip(Self.fillTools.contains(where: { $0.rawValue == i }) ? base + "　押し続けると、枠だけ／塗りつぶしを選べる" : base, forSegment: i)
+        }
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)
         clearButton.toolTip = hint("描いたものをすべて消す（背景画像は残る。取り消しで戻せる）", .clearCanvas)
