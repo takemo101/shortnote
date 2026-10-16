@@ -97,7 +97,10 @@ func dumpTree(_ app: AXUIElement) -> String {
 }
 
 // ---------- input (guarded) ----------
-func post(_ t: CGEventType, _ p: CGPoint) { CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)!.post(tap: .cghidEventTap); usleep(12_000) }
+// 修飾キーなしのマウスにしたいときだけ、`clearMouseFlags` を立てる。nil の source では、直前に（修飾キーつきで）送ったキー入力の状態（Cmd+Shift など）が
+// マウスのイベントに引き継がれる（H4 で観測：Shift つきの扱いになり、縦横比が保たれた）。常には立てない（他の検証の、今までの条件を変えないため）。
+var clearMouseFlags = false
+func post(_ t: CGEventType, _ p: CGPoint) { let e = CGEvent(mouseEventSource: nil, mouseType: t, mouseCursorPosition: p, mouseButton: .left)!; if clearMouseFlags { e.flags = [] }; e.post(tap: .cghidEventTap); usleep(12_000) }
 func line(_ a: CGPoint, _ b: CGPoint, steps: Int = 24) -> [CGPoint] { (0...steps).map { CGPoint(x: a.x + (b.x - a.x) * CGFloat($0) / CGFloat(steps), y: a.y + (b.y - a.y) * CGFloat($0) / CGFloat(steps)) } }
 func drag(_ pts: [CGPoint], pid: pid_t) -> Bool {
     for p in [pts.first!, pts[pts.count / 2], pts.last!] where hitOwner(p) != pid { print("   guard refused drag at \(p): front-most owner=\(String(describing: hitOwner(p))) want \(pid)"); return false }
@@ -415,7 +418,7 @@ if !dragsrcOK {
     if let r = exportImg() { rec("M2 Cmd+Z undoes the move", (isMag(at(r, 60, 290)) && !isMag(at(r, 400, 100))) ? "pass" : "fail", "image back at drop location") }
     key(6, .maskCommand)
     if let r = exportImg() { rec("M3 Cmd+Z undoes the dropped image", (!isMag(at(r, 200, 200)) && isColor(at(r, 240, 160), 0.9, 0.1, 0.1)) ? "pass" : "fail", "pasted red image remains") }
-} else { rec("M2/M3 undo", "blocked", "keyboard guard failed") }
+} else { rec("M2/M3 undo", "blocked", "keyboard guard failed: \(keyGuard(pid, app) ?? "passed on the retry")") }
 
 // ---- ウィンドウのリサイズ・最大化（A12）----
 func axWindow() -> AXUIElement? { (ax(app, "AXWindows") as? [AXUIElement])?.first }
@@ -941,6 +944,8 @@ if let why = keyGuard(pid, app) {
     if selectTool(Seg.ellipse), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
        selectTool(Seg.move), drag(line(pt(103, 103), pt(W + 8, H + 20)), pid: pid) {
         // 掴める範囲（外接する範囲＋4 pt）の、16 pt が、右下の角に残る。そこ（W-10, H-10）を掴んで、左上へ戻す。
+        // 選ばれた図形の角は、取っ手になる（SPEC §3.2.3）ので、何もない所をクリックして、選びを外してから掴む
+        _ = click(pt(20, 20))
         let back = (dx: -300.0, dy: -200.0)
         let moved = drag(line(pt(W - 10, H - 10), pt(W - 10 + back.dx, H - 10 + back.dy)), pid: pid)
         let shift = (x: (W - 110) + back.dx, y: (H - 110) + back.dy)   // 1 回目：掴める範囲が、右下に 16 pt 残る位置まで。2 回目：戻した量
@@ -1372,6 +1377,69 @@ do {
         _ = selectTool(Seg.pen)
         _ = runCLI(["clear"])
     } else { for id in resizeIds { rec(id, "blocked", "tool select failed") } }
+}
+
+// ---- 円・四角・直線の大きさの変更（A29）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let shapeIds = [
+        "H4 move tool: click a rect, drag its bottom-right handle with the real pointer: the top-left stays, the aspect is NOT kept (free), get reports the new w/h; Cmd+Z restores",
+        "H5 move tool: click a line, drag its end handle with the real pointer: only that end moves, the other end stays; Cmd+Z restores",
+        "H6 a freehand (pen) stroke is not resizable: dragging where a handle would be just moves it",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func item(_ op: String) -> [String: Any]? { agentGet()?.items.first(where: { $0["op"] as? String == op }) }
+    func pair(_ v: Any?) -> (Double, Double)? { guard let a = v as? [Any], a.count == 2, let x = numOf(a[0]), let y = numOf(a[1]) else { return nil }; return (x, y) }
+    let drawn = agentDraw(##"{"op":"rect","x":100,"y":100,"w":200,"h":100,"color":"#ff0000"},{"op":"line","from":[60,260],"to":[200,300],"color":"#0000ff"}"##)
+    if drawn.0 != 0 {
+        for id in shapeIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
+    } else if keyGuard(pid, app) != nil {
+        for id in shapeIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == 6, selectTool(Seg.move) {
+        // H4：四角（x=100, y=100, 200×100）。右下の取っ手（300, 200）を、(360, 220) へ
+        let selected = click(pt(200, 150))
+        let dragged = drag(line(pt(300, 200), pt(360, 220)), pid: pid)
+        if selected, dragged, let r = item("rect"), let x = numOf(r["x"]), let y = numOf(r["y"]), let w = numOf(r["w"]), let h = numOf(r["h"]) {
+            let ok = abs(x - 100) <= 1 && abs(y - 100) <= 1 && abs(w - 260) <= 3 && abs(h - 120) <= 3 && abs(h - w / 2) > 5   // 縦横比（2:1）を保てば h は 130
+            key(6, .maskCommand)
+            let back = item("rect").flatMap { r -> Bool? in
+                guard let w = numOf(r["w"]), let h = numOf(r["h"]) else { return nil }
+                return abs(w - 200) < 0.01 && abs(h - 100) < 0.01 }
+            rec(shapeIds[0], (ok && back == true) ? "pass" : "fail", "after drag x=\(x) y=\(y) w=\(w) h=\(h) (expect 100,100,≈260,≈120; the 2:1 aspect would give h=\(w / 2)); after Cmd+Z back to 200x100=\(String(describing: back))")
+        } else { rec(shapeIds[0], "blocked", "click/drag guard refused or get failed (selected=\(selected) dragged=\(dragged))") }
+
+        // H5：直線（(60,260)→(200,300)）。終点の取っ手を、(260, 250) へ
+        _ = click(pt(20, 20))   // 何もない所：選びを外す
+        let lineSelected = click(pt(130, 280))
+        let lineDragged = drag(line(pt(200, 300), pt(260, 250)), pid: pid)
+        if lineSelected, lineDragged, let l = item("line"), let f = pair(l["from"]), let t = pair(l["to"]) {
+            let ok = abs(f.0 - 60) <= 1 && abs(f.1 - 260) <= 1 && abs(t.0 - 260) <= 2 && abs(t.1 - 250) <= 2
+            key(6, .maskCommand)
+            let back = item("line").flatMap { l -> Bool? in
+                guard let t = pair(l["to"]) else { return nil }
+                return abs(t.0 - 200) < 0.01 && abs(t.1 - 300) < 0.01 }
+            rec(shapeIds[1], (ok && back == true) ? "pass" : "fail", "after drag from=\(f) to=\(t) (expect (60,260) kept, ≈(260,250)); after Cmd+Z the end is back at (200,300)=\(String(describing: back))")
+        } else { rec(shapeIds[1], "blocked", "click/drag guard refused or get failed (selected=\(lineSelected) dragged=\(lineDragged))") }
+
+        // H6：フリーハンド。斜めの線を描いてから、移動ツールで、描いた線の端（取っ手が出る位置）を掴む → 動くだけ
+        _ = runCLI(["clear"])
+        _ = selectTool(Seg.pen)
+        let drewPen = drag(line(pt(100, 100), pt(200, 160), steps: 12), pid: pid)
+        _ = selectTool(Seg.move)
+        let pickedPen = click(pt(150, 130))
+        let movedPen = drag(line(pt(200, 160), pt(260, 190)), pid: pid)   // 終点を掴んで動かす
+        let penItem = item("pen")
+        let pts = (penItem?["points"] as? [[Any]])?.compactMap { pair($0) } ?? []
+        if drewPen, pickedPen, movedPen, let f = pts.first, let l = pts.last {
+            let dx = f.0 - 100, dy = f.1 - 100                          // 始点も同じだけ動いた（形が保たれたまま、移動）
+            let sameShift = abs((l.0 - 200) - dx) < 3 && abs((l.1 - 160) - dy) < 3
+            rec(shapeIds[2], (abs(dx - 60) <= 3 && abs(dy - 30) <= 3 && sameShift) ? "pass" : "fail", "pen stroke shifted by (\(dx), \(dy)) (expect ≈(60,30)); start and end shifted equally=\(sameShift)")
+        } else { rec(shapeIds[2], "blocked", "drag guard or pen points unavailable (drew=\(drewPen) picked=\(pickedPen) moved=\(movedPen) points=\(pts.count))") }
+        _ = selectTool(Seg.pen)
+        _ = runCLI(["clear"])
+    } else { for id in shapeIds { rec(id, "blocked", "tool select failed") } }
 }
 
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
