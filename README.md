@@ -65,6 +65,10 @@ $ShortNote clear             # 描いたものを消す（背景は残る。取�
 
 終了コードは、0 成功、1 操作の JSON が不正（何も適用しない）、2 引数の誤り、3 アプリに届かない（`get`・`export`・`clear` は、動いていなければ起動しない）、4 ファイルの入出力です。アプリとの通信は、同じユーザーだけが使える Unix ドメインソケット（`~/Library/Application Support/ShortNote/`）だけで、ネットワークには出ません。
 
+### エージェント向けの skill
+
+エージェントに、この CLI の使い方を伝える skill を、[skills/shortnote/SKILL.md](skills/shortnote/SKILL.md) に置いています（コマンド、操作の JSON、座標と画像との対応、終了コード、矢印の作り方、注意点）。お使いのエージェントの skill の置き場（Claude Code なら `~/.claude/skills/`）へ、`skills/shortnote` ディレクトリをコピーして使います。
+
 ## ダウンロード
 
 リリースは、タグ `vX.Y.Z` のときに GitHub Actions が作ります。公開されたリリースは [Releases](https://github.com/takemo101/shortnote/releases) に並び、`ShortNote-X.Y.Z.dmg` をダウンロードできます（macOS 13 以降、Apple Silicon と Intel の両対応）。DMG を開いて、ShortNote を「Applications」へドラッグしてください。
