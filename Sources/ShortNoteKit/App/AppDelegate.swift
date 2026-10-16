@@ -44,6 +44,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.controller.promptCanvasSize()
         }
         statusMenu.onShowShortcuts = { [weak self] in self?.shortcutsWindow.show() }
+        statusMenu.commandState = { CommandLineTool().state }
+        statusMenu.onToggleCommand = { [weak self] in self?.toggleCommand() }
         self.statusMenu = statusMenu
 
         hotKey = GlobalHotKey { [weak self] in self?.controller.show() }
@@ -82,6 +84,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         agentServer?.stop()
+    }
+
+    /// コマンド `snote` を入れる・外す。管理者のパスワードが要るときは、OS のダイアログが出る。失敗したら、理由を見せる（取り消しは、黙って何もしない）。
+    private func toggleCommand() {
+        let tool = CommandLineTool()
+        let error = tool.state == .installed ? tool.uninstall() : tool.install()
+        guard let error else { return }
+        let alert = NSAlert()
+        alert.messageText = "コマンド「\(CommandLineTool.name)」を変えられませんでした"
+        alert.informativeText = error
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
     }
 
     /// 割り当てが変わったら、全域ホットキー・メニュー・ツールチップ・設定ウィンドウの表示を合わせる。

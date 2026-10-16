@@ -56,6 +56,8 @@ flowchart TD
 | | `AgentSocket`、`AgentServer`、`AgentClient` | Unix ドメインソケット（`~/Library/Application Support/ShortNote/agent-<バンドル ID>.sock`、ディレクトリ 0700・ソケット 0600）。アプリ側は、接続ごとに、改行までを 1 つの要求として読み、返事を書いて閉じる（大きすぎる要求は断る、古いソケットは作り直す）。CLI 側は、送って、返事を待つ。`draw` だけ、動いていなければ、フォーカスを奪わずに起動して待つ | ソケットのファイルは、実行中だけ |
 | `Render/` | `CanvasRenderer` | 画面と書き出しで共通の描画（`drawContent`）、市松模様の下地、PNG の生成 | なし |
 | `Platform/` | `ImageIntake` | 画像を `ImportedImage` にする入口（ペーストボード・ドロップ・ファイル選択・CLI）。`Result` で返す。ビットマップは画素をそのまま、PDF などは書き出し倍率の画素に描く。CLI・`open` で明示された 1 つのファイルだけは、種類で絞らず読む | なし |
+| | `AppLocation` | 実行ファイルのパスを、シンボリックリンクを辿って解決し、それを含む `.app` とバンドル ID を返す（`snote` のようなリンク経由の起動でも、アプリを見つけられるようにする。`Bundle.main` は、リンクの場所を基準にするので、CLI では使わない）。GUI の起動では、`runShortNote` が、リンク経由なら、最初に本物の実行ファイルで `exec` し直す | なし |
+| | `CommandLineTool` | コマンド `snote`：`/usr/local/bin/snote` から、アプリの実行ファイルへのシンボリックリンクを、入れる・付け替える・外す・状態（未導入・導入済み・別の場所の ShortNote を指す〔stale〕・別のもの・使えない）を調べる。ディレクトリに書けなければ、管理者のパスワードを求める（`NSAppleScript`）。ShortNote ではない別のものは、上書きも削除もしない | リンクのファイル（システム側） |
 | | `ExportStore` | 書き出し先 `/tmp/shortnote/`、直前のファイルの再利用、`ExportError`（生成失敗・書込み失敗） | `cachedURL` |
 | | `GlobalHotKey` | Carbon の `RegisterEventHotKey`（アクセシビリティ権限が要らない）で全域ショートカットを登録。登録し直せる | 登録参照、ハンドラ（static） |
 | | `KeyboardLayout` | 現在のキーボード配列（US・JIS など）で、物理キー 0〜127 が出す文字の対応表を、1 度だけ引いて返す（`UCKeyTranslate`。メインスレッドで使う）。`[` `]` の既定のキーを決めるのに使う | なし |

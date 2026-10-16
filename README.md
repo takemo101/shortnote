@@ -65,6 +65,22 @@ $ShortNote clear             # 描いたものを消す（背景は残る。取�
 
 終了コードは、0 成功、1 操作の JSON が不正（何も適用しない）、2 引数の誤り、3 アプリに届かない（`get`・`export`・`clear` は、動いていなければ起動しない）、4 ファイルの入出力です。アプリとの通信は、同じユーザーだけが使える Unix ドメインソケット（`~/Library/Application Support/ShortNote/`）だけで、ネットワークには出ません。
 
+### コマンド「snote」
+
+フルパスの代わりに、`snote` と打てるようにできます。メニューバーのアイコン →「コマンド「snote」を入れる…」を押すと、`/usr/local/bin/snote` に、アプリの実行ファイルへのリンクを張ります（管理者のパスワードを求められます）。リンク先は、アプリのパスなので、アプリを更新しても、そのまま使えます。外すのも、同じ項目です（自分のリンクだけを消します）。同じ名前の別のものがあるときは、上書きしません。
+
+```sh
+snote render screenshot.png ops.json -o out.png
+snote draw ops.json
+```
+
+自分で張るなら、次のとおりです（アプリを「アプリケーション」に置いてから）。
+
+```sh
+sudo mkdir -p /usr/local/bin
+sudo ln -s /Applications/ShortNote.app/Contents/MacOS/ShortNote /usr/local/bin/snote
+```
+
 ### エージェント向けの skill
 
 エージェントに、この CLI の使い方を伝える skill を、[skills/shortnote/SKILL.md](skills/shortnote/SKILL.md) に置いています（コマンド、操作の JSON、座標と画像との対応、終了コード、矢印の作り方、注意点）。お使いのエージェントの skill の置き場（Claude Code なら `~/.claude/skills/`）へ、`skills/shortnote` ディレクトリをコピーして使います。

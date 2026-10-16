@@ -8,7 +8,9 @@ description: Use when you need to annotate a screenshot or image (boxes, arrows,
 ShortNote is a macOS menu-bar sticky-note paint tool. A human draws on its canvas; **an agent can add shapes, text and images to that canvas through a shell CLI** (even while the human is typing or dragging, without breaking their input). There is no MCP server; this skill documents the CLI.
 
 ```sh
-SN=/Applications/ShortNote.app/Contents/MacOS/ShortNote   # for a local build: build/ShortNote.app/Contents/MacOS/ShortNote
+SN=$(command -v snote || echo /Applications/ShortNote.app/Contents/MacOS/ShortNote)
+# `snote` is a symlink to the app's executable that the human can install from ShortNote's menu-bar menu.
+# Without it, use the full path above (for a local build: build/ShortNote.app/Contents/MacOS/ShortNote).
 ```
 
 ## Which command

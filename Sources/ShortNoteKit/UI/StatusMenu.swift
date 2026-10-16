@@ -8,9 +8,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     var onShowShortcuts: (() -> Void)?
     /// 保存中のキャンバスのサイズ（開くたびに、チェック表示に使う）。
     var savedSize: () -> CanvasSize = { .standard }
+    /// コマンド `snote` の、いまの状態（開くたびに、項目の表示に使う）。
+    var commandState: () -> CommandLineTool.State = { .unavailable }
+    /// 項目が押された（入れる、または外す。どちらかは、状態で決まる）。
+    var onToggleCommand: (() -> Void)?
 
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let hint = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let commandItem = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     override init() {
         super.init()
@@ -37,8 +42,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         menu.addItem(sizeItem)
 
         menu.addItem(item("ショートカット…", #selector(shortcutsPressed)))
+        commandItem.target = self
+        commandItem.action = #selector(commandPressed)
+        menu.addItem(commandItem)
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "終了", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.delegate = self   // 開くたびに、コマンドの項目の表示を直す
         statusItem.menu = menu
     }
 
@@ -73,6 +82,29 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func openPressed() { onOpen?() }
     @objc private func customPressed() { onCustomSize?() }
     @objc private func shortcutsPressed() { onShowShortcuts?() }
+    @objc private func commandPressed() { onToggleCommand?() }
+
+    /// `snote` の項目：入れていなければ「入れる」、入れてあれば「外す」。別のものがある・アプリの場所が不安定なときは、押せない説明にする。
+    private func updateCommandItem() {
+        let name = CommandLineTool.name
+        switch commandState() {
+        case .notInstalled:
+            commandItem.title = "コマンド「\(name)」を入れる…"
+            commandItem.isEnabled = true
+        case .installed:
+            commandItem.title = "コマンド「\(name)」を外す"
+            commandItem.isEnabled = true
+        case .stale:
+            commandItem.title = "コマンド「\(name)」：別の場所の ShortNote を指しています。付け替える…"
+            commandItem.isEnabled = true
+        case .other:
+            commandItem.title = "コマンド「\(name)」：同じ名前の別のものがあります"
+            commandItem.isEnabled = false
+        case .unavailable:
+            commandItem.title = "コマンド「\(name)」：「アプリケーション」に置くと使えます"
+            commandItem.isEnabled = false
+        }
+    }
 
     @objc private func presetPressed(_ sender: NSMenuItem) {
         guard CanvasSize.presets.indices.contains(sender.tag) else { return }
@@ -81,6 +113,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// 開くたびに、保存中のサイズにチェックを付ける。プリセットに無いサイズなら、末尾の「数値で指定…」に数値を出してチェックする。
     func menuNeedsUpdate(_ menu: NSMenu) {
+        if menu === statusItem.menu { updateCommandItem(); return }
         let saved = savedSize()
         var matchedPreset = false
         for menuItem in menu.items where CanvasSize.presets.indices.contains(menuItem.tag) && menuItem.action == #selector(presetPressed(_:)) {
