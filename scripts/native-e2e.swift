@@ -1323,6 +1323,57 @@ do {
     } else { rec(fillIds[2], "blocked", "tool select failed"); rec(fillIds[3], "blocked", "tool select failed") }
 }
 
+// ---- 画像の拡大縮小（A28）----
+do {
+    let resizeIds = [
+        "H1 move tool: click an image, drag its bottom-right handle with the real pointer: the opposite corner stays, the aspect ratio is kept, and get reports the new size",
+        "H2 one Cmd+Z returns the image to its original box (one undo step), and Cmd+Shift+Z resizes it again",
+        "H3 the selection frame and handles are not in the exported PNG (the export is byte-identical before and after selecting)",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func imageBox() -> (x: Double, y: Double, w: Double, h: Double)? {
+        guard let it = agentGet()?.items.first(where: { $0["op"] as? String == "image" }),
+              let x = numOf(it["x"]), let y = numOf(it["y"]), let w = numOf(it["w"]), let h = numOf(it["h"]) else { return nil }
+        return (x, y, w, h)
+    }
+    let drawn = agentDraw(##"{"op":"image","path":"\##(work)/red.png","x":100,"y":100,"w":200,"h":100}"##)
+    if drawn.0 != 0 || imageBox() == nil {
+        for id in resizeIds { rec(id, "blocked", "draw image failed: exit=\(drawn.0) \(drawn.2)") }
+    } else if keyGuard(pid, app) != nil {
+        for id in resizeIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == 6, selectTool(Seg.move) {
+        let original = imageBox()!
+        let exportBefore = agentExportRep().flatMap { FileManager.default.contents(atPath: $0.path) }
+        let selected = click(pt(200, 150))
+        let exportSelected = agentExportRep().flatMap { FileManager.default.contents(atPath: $0.path) }
+        rec(resizeIds[2], (selected && exportBefore != nil && exportBefore == exportSelected) ? "pass" : (selected ? "fail" : "blocked"),
+            "click delivered=\(selected); export bytes before=\(exportBefore?.count ?? -1) after selecting=\(exportSelected?.count ?? -1) identical=\(exportBefore != nil && exportBefore == exportSelected)")
+        // 右下の取っ手（300, 200）を、右へ 60 pt
+        let dragged = drag(line(pt(300, 200), pt(360, 200)), pid: pid)
+        let after = imageBox()
+        if dragged, let a = after {
+            let ratio = a.w / a.h
+            let grew = a.w > original.w + 40
+            let anchorKept = abs(a.x - original.x) <= 1 && abs(a.y - original.y) <= 1
+            rec(resizeIds[0], (grew && anchorKept && abs(ratio - 2) < 0.05 && abs(a.w - 260) <= 4) ? "pass" : "fail",
+                "before=\(original) after=\(a); grew=\(grew) top-left kept=\(anchorKept) aspect=\(ratio) (expect 2.0 ±0.05) width=\(a.w) (expect ≈260)")
+            key(6, .maskCommand)
+            let undone = imageBox(), count1 = agentGet()?.items.count
+            key(6, [.maskCommand, .maskShift])
+            let redone = imageBox()
+            let same = { (p: (x: Double, y: Double, w: Double, h: Double)?, q: (x: Double, y: Double, w: Double, h: Double)) -> Bool in
+                p.map { abs($0.x - q.x) < 0.01 && abs($0.y - q.y) < 0.01 && abs($0.w - q.w) < 0.01 && abs($0.h - q.h) < 0.01 } ?? false }
+            rec(resizeIds[1], (same(undone, original) && count1 == 1 && same(redone, a)) ? "pass" : "fail",
+                "after Cmd+Z=\(String(describing: undone)) (expect \(original)), items=\(String(describing: count1)); after Cmd+Shift+Z=\(String(describing: redone)) (expect \(a))")
+        } else {
+            rec(resizeIds[0], "blocked", "drag guard refused or get failed (dragged=\(dragged))"); rec(resizeIds[1], "blocked", "no resize to undo")
+        }
+        _ = selectTool(Seg.pen)
+        _ = runCLI(["clear"])
+    } else { for id in resizeIds { rec(id, "blocked", "tool select failed") } }
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)

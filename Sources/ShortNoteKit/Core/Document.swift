@@ -61,6 +61,20 @@ struct Document {
         return items[index].bounds != base.items[index].bounds
     }
 
+    /// `index` の要素が画像（貼り付け・ドロップ・ファイル選択で足したもの）なら、その枠。背景画像は要素ではないので、`nil`。
+    func imageBox(at index: Int) -> CGRect? {
+        guard items.indices.contains(index), case .image(_, let box) = items[index].content else { return nil }
+        return box
+    }
+
+    /// `index` の画像の枠を `box` にしたものを返す。画像でなければ `nil`。
+    func resizingImage(at index: Int, to box: CGRect) -> Document? {
+        guard items.indices.contains(index), case .image(let image, _) = items[index].content else { return nil }
+        var copy = self
+        copy.items[index].content = .image(image, box: box)
+        return copy
+    }
+
     /// 描いたもの（要素）をすべて消した文書を返す。背景画像は残す。消すものが無いときは `nil`（履歴に積む変更が無い）。
     func clearingItems() -> Document? {
         guard !items.isEmpty else { return nil }

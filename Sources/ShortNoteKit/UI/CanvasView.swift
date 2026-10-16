@@ -14,6 +14,7 @@ final class CanvasView: NSView {
     var tool: Tool = .pen {
         didSet {
             commitEditing()
+            selectedImage = nil
             window?.invalidateCursorRects(for: self)
         }
     }
@@ -44,6 +45,12 @@ final class CanvasView: NSView {
     private var dragStart = CGPoint.zero
     /// 移動ツールで、動かしている要素の番号と、動かし始める前の文書。
     private var move: (index: Int, base: Document)?
+    /// 移動ツールで選ばれている画像の番号（要素の番号）。四隅に取っ手が出る（SPEC §3.2.3）。保存しない。
+    private(set) var selectedImage: Int? {
+        didSet { if oldValue != selectedImage { needsDisplay = true } }
+    }
+    /// 取っ手をドラッグしている角と、掴んだ位置から角までの差（`move` と同時に立つ）。
+    private var resizing: (corner: ImageResize.Corner, offset: CGSize)?
     private lazy var editor: InlineTextEditor = {
         let editor = InlineTextEditor(host: self)
         editor.onCommitRequested = { [weak self] in self?.commitEditing() }
@@ -97,6 +104,7 @@ final class CanvasView: NSView {
     func undo() {
         commitEditing()
         cancelPointerInteraction()
+        selectedImage = nil
         guard let previous = history.undo(current: document) else { return }
         document = previous
         changed()
@@ -105,6 +113,7 @@ final class CanvasView: NSView {
     func redo() {
         commitEditing()
         cancelPointerInteraction()
+        selectedImage = nil
         guard let next = history.redo(current: document) else { return }
         document = next
         changed()
@@ -115,6 +124,7 @@ final class CanvasView: NSView {
     func clearCanvas() {
         commitEditing()
         cancelPointerInteraction()
+        selectedImage = nil
         guard let cleared = document.clearingItems() else { return }
         commit(cleared)
     }
@@ -141,6 +151,7 @@ final class CanvasView: NSView {
         }
         draft = nil
         move = nil
+        resizing = nil
     }
 
     // MARK: - エージェントの操作（SPEC §3.7）
@@ -176,6 +187,8 @@ final class CanvasView: NSView {
         let base = committedDocument
         guard let cleared = base.clearingItems() else { return false }
         move = nil
+        resizing = nil
+        selectedImage = nil
         history.record(previous: base)
         document = cleared
         window?.invalidateCursorRects(for: self)
@@ -195,6 +208,7 @@ final class CanvasView: NSView {
     func loadImage(at url: URL) -> Bool {
         guard case .success(let image) = ImageIntake.image(at: url) else { return false }
         commitEditing()
+        selectedImage = nil
         commit(Document(background: image, backgroundRect: fitted(image.pointSize)))
         return true
     }
@@ -270,9 +284,16 @@ final class CanvasView: NSView {
         case .text:
             beginText(at: p)
         case .move:
-            if let index = document.topItemIndex(at: p) {
+            if let index = selectedImage, let box = document.imageBox(at: index), let corner = ImageResize.corner(at: p, in: box) {
+                let at = corner.point(in: box)
                 move = (index, document)
+                resizing = (corner, CGSize(width: at.x - p.x, height: at.y - p.y))
+            } else if let index = document.topItemIndex(at: p) {
+                move = (index, document)
+                selectedImage = document.imageBox(at: index) != nil ? index : nil
                 NSCursor.closedHand.set()
+            } else {
+                selectedImage = nil
             }
         }
         needsDisplay = true
@@ -281,6 +302,14 @@ final class CanvasView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let p = location(event)
         if let move {
+            if let resizing, let original = move.base.imageBox(at: move.index) {
+                let pointer = CGPoint(x: p.x + resizing.offset.width, y: p.y + resizing.offset.height).clamped(to: bounds)   // 掴んだ差を足したあとも、縁に丸める（SPEC §3.2）
+                let box = ImageResize.box(original: original, corner: resizing.corner, pointer: pointer, keepAspect: !event.modifierFlags.contains(.shift))
+                guard let resized = move.base.resizingImage(at: move.index, to: box) else { return }
+                document = resized
+                needsDisplay = true
+                return
+            }
             guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
             document = moved
             needsDisplay = true
@@ -306,6 +335,7 @@ final class CanvasView: NSView {
     override func mouseUp(with event: NSEvent) {
         if let finished = move {
             move = nil
+            resizing = nil
             window?.invalidateCursorRects(for: self)
             if document.hasMovedItem(at: finished.index, since: finished.base) {   // 上限で止まって動かなかったドラッグは、取り消しの段にしない
                 history.record(previous: finished.base)
@@ -379,6 +409,28 @@ final class CanvasView: NSView {
         ctx.setStrokeColor(NSColor.separatorColor.cgColor)
         ctx.setLineWidth(1)
         ctx.stroke(bounds.insetBy(dx: 0.5, dy: 0.5))
+        drawSelectionHandles(in: ctx)
+    }
+
+    /// 選ばれた画像の、点線の枠と四隅の取っ手。画面だけの表示で、書き出し（`renderPNG`）には入らない。
+    private func drawSelectionHandles(in ctx: CGContext) {
+        guard tool == .move, let index = selectedImage, let box = document.imageBox(at: index) else { return }
+        let accent = NSColor.controlAccentColor.cgColor
+        ctx.saveGState()
+        ctx.setStrokeColor(accent)
+        ctx.setLineWidth(1)
+        ctx.setLineDash(phase: 0, lengths: [4, 3])
+        ctx.stroke(box)
+        ctx.setLineDash(phase: 0, lengths: [])
+        let s = ImageResize.handleSize
+        for corner in ImageResize.Corner.allCases {
+            let p = corner.point(in: box)
+            let handle = CGRect(x: p.x - s / 2, y: p.y - s / 2, width: s, height: s)
+            ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+            ctx.fill(handle)
+            ctx.stroke(handle)
+        }
+        ctx.restoreGState()
     }
 
     /// 現在のキャンバス全体の PNG。入力中の文字は、確定してから含める。生成できなければ `nil`。
