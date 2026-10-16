@@ -149,10 +149,10 @@ struct RenderCommandTests {
         }
     }
 
-    @Test("CLI：render だけがサブコマンド。ほかの名前と、画像のパスは、アプリの起動のまま")
+    @Test("CLI：サブコマンドは render・draw・get・export・clear だけ。ほかの名前と、画像のパスは、アプリの起動のまま")
     func subcommandDetection() {
-        #expect(AgentCLI.handles("render"))
-        for other in ["draw", "get", "export", "clear", "./render", "/tmp/render.png", "image.png", "-psn_0_1"] { #expect(!AgentCLI.handles(other), "\(other)") }
+        for name in ["render", "draw", "get", "export", "clear"] { #expect(AgentCLI.handles(name), "\(name)") }
+        for other in ["Draw", "./draw", "/tmp/render.png", "image.png", "-psn_0_1", "--no-activate", "paint"] { #expect(!AgentCLI.handles(other), "\(other)") }
     }
 
     @Test("CLI：終了コード（誤った使い方は 2、成功は 0、不正な JSON は 1）")

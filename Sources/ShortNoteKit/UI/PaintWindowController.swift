@@ -250,3 +250,40 @@ final class PaintWindowController: NSObject {
         }
     }
 }
+
+// MARK: - エージェントの操作（SPEC §3.7）
+
+extension PaintWindowController: AgentCanvas {
+    /// ウィンドウを前面に出す。アプリを前面にしない・キーにしない（人の入力先を、奪わない）。
+    func showWithoutActivating() {
+        if !positioned {
+            panel.center()
+            positioned = true
+        }
+        panel.orderFrontRegardless()
+    }
+
+    var agentCanvasSize: CGSize { canvas.bounds.size }
+
+    func agentAppend(_ items: [Item]) {
+        canvas.appendFromAgent(items)
+        showWithoutActivating()   // 人が見ているキャンバスに出す
+    }
+
+    func agentClear() -> Bool { canvas.clearFromAgent() }
+
+    func agentSnapshot() -> AgentSnapshot {
+        let document = canvas.committedDocument
+        return AgentSnapshot(
+            size: canvas.bounds.size,
+            background: document.background == nil ? nil : document.backgroundRect,
+            editing: canvas.isInteracting,
+            items: document.items
+        )
+    }
+
+    func agentExport() -> URL? {
+        if case .success(let url) = exportStore.url(render: { canvas.renderCommittedPNG() }) { return url }
+        return nil
+    }
+}

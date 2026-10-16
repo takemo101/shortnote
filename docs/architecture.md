@@ -20,6 +20,7 @@ flowchart TD
     UI --> Platform[Platform: OS との接点]
     UI --> Core
     UI --> Shortcuts[Shortcuts: キーの割り当て]
+    UI --> Agent
     Render --> Core[Core: 文書・履歴・サイズ]
     Platform --> Core
     Platform --> Shortcuts
@@ -49,7 +50,10 @@ flowchart TD
 | `Agent/` | `AgentError`、`AgentJSON` | CLI の失敗（`code`・終了コード 1〜4）と、標準出力・標準エラーの 1 行の JSON（SPEC §3.7） | なし |
 | | `Op`、`OpsParser` | 操作 1 つの値と、操作の JSON の検証（境界で一度だけ型にする。知らない項目・範囲外の値・上限超えは、何番目の操作かを付けて断る。1 つでも不正なら全体を断る） | なし |
 | | `OpsApply` | 検証済みの操作を `Item` にする。範囲外の座標は縁に丸め（`clamped`）、大きさがなくなった図形は足さずに `skipped` で返す。画像の読み込みは差し替えられる（テスト用） | なし |
-| | `RenderCommand`、`AgentCLI` | `render` の引数の解釈と実行（アプリを起動せず、`Document` を作って `CanvasRenderer` で PNG にする）。サブコマンドの振り分け（`runShortNote` が最初の引数で判断する） | なし |
+| | `RenderCommand`、`LiveCommand`、`AgentCLI` | `render` の引数の解釈と実行（アプリを起動せず、`Document` を作って `CanvasRenderer` で PNG にする）。`draw`・`get`・`export`・`clear` の引数の解釈と、送る 1 行の要求の組み立て（操作の JSON は、送る前に検証し、相対パスの画像を絶対パスにする）。サブコマンドの振り分け（`runShortNote` が最初の引数で判断する） | なし |
+| | `AgentCanvas`、`AgentSnapshot` | エージェントの操作が届くキャンバスの窓口（`draw` で足す・`clear`・確定済みの内容・書き出し）。`PaintWindowController` が実装する（UI → Agent の依存はここだけ）。サービスは、AppKit なしで試験できる | なし |
+| | `AgentService`、`ItemEncoder` | 受けた 1 行の要求（`draw`・`get`・`export`・`clear`）を実行して、1 行の JSON を返す。`get` の要素は、操作の JSON と同じ形（`ItemEncoder`）。取り消しの 1 段・丸め・エラーは `draw` が決める | なし |
+| | `AgentSocket`、`AgentServer`、`AgentClient` | Unix ドメインソケット（`~/Library/Application Support/ShortNote/agent-<バンドル ID>.sock`、ディレクトリ 0700・ソケット 0600）。アプリ側は、接続ごとに、改行までを 1 つの要求として読み、返事を書いて閉じる（大きすぎる要求は断る、古いソケットは作り直す）。CLI 側は、送って、返事を待つ。`draw` だけ、動いていなければ、フォーカスを奪わずに起動して待つ | ソケットのファイルは、実行中だけ |
 | `Render/` | `CanvasRenderer` | 画面と書き出しで共通の描画（`drawContent`）、市松模様の下地、PNG の生成 | なし |
 | `Platform/` | `ImageIntake` | 画像を `ImportedImage` にする入口（ペーストボード・ドロップ・ファイル選択・CLI）。`Result` で返す。ビットマップは画素をそのまま、PDF などは書き出し倍率の画素に描く。CLI・`open` で明示された 1 つのファイルだけは、種類で絞らず読む | なし |
 | | `ExportStore` | 書き出し先 `/tmp/shortnote/`、直前のファイルの再利用、`ExportError`（生成失敗・書込み失敗） | `cachedURL` |

@@ -139,6 +139,8 @@ FileManager.default.createFile(atPath: "\(work)/cand.log", contents: nil, attrib
 let infoPlistPath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Info.plist").path
 let bundleId = sh(["plutil", "-extract", "CFBundleIdentifier", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
 let bundleIdOK = !bundleId.isEmpty && !bundleId.contains(" ") && bundleId.contains(".")
+/// 候補が受けるソケット（SPEC §3.7）。候補の bundle ID ごとに別なので、本番のものとは混ざらない。終了時に、このファイルだけを消す。
+let agentSocketPath = NSHomeDirectory() + "/Library/Application Support/ShortNote/agent-\(bundleId).sock"
 // 同じ bundle ID の常駐があると、起動が転送され（候補が出ない）、保存したサイズも本番のものと混ざる。scripts/e2e.sh は bundle ID を変えたコピーで実行する。
 if bundleIdOK, !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty {
     print("blocked: an instance with bundle id \(bundleId) is already running; it would receive the launch and its saved canvas size would be touched.\nUse scripts/e2e.sh (re-signed copy with another bundle id), or quit that instance first (a stale candidate left by a crashed run counts too: stop it by its recorded PID).")
@@ -180,6 +182,7 @@ func finish() -> Never {
     let psExe = sh(["ps", "-p", "\(pid)", "-o", "comm="]).1.trimmingCharacters(in: .whitespacesAndNewlines)
     if psStart == startTime && psExe == exePath { kill(pid, SIGTERM); _ = wait(3) { !proc.isRunning } }
     print("cleanup: terminated pid \(pid) (cleanup only, not a quit test); still running=\(proc.isRunning)")
+    if bundleIdOK { unlink(agentSocketPath) }
     let sha = sh(["shasum", "-a", "256", buildExe]).1.split(separator: " ").first.map(String.init) ?? "?"
     let report: [String: Any] = [
         "schema_version": 1, "executable": buildExe, "binary_sha256": sha,
@@ -1046,6 +1049,166 @@ do {
         "exit=\(r4.0) stdout=\(r4.1.trimmingCharacters(in: .whitespacesAndNewlines)) stderr='\(r4.2)'")
 }
 
+// ---- エージェントの操作：常駐中のアプリへ（A22〜A24。draw・get・export・clear とソケット）----
+func jsonObj(_ s: String) -> [String: Any]? { (try? JSONSerialization.jsonObject(with: Data(s.trimmingCharacters(in: .whitespacesAndNewlines).utf8))) as? [String: Any] }
+func numOf(_ v: Any?) -> Double? { (v as? NSNumber)?.doubleValue }
+/// `get` の要素の列と、いまのキャンバスの全体。
+func agentGet() -> (items: [[String: Any]], editing: Bool, background: [String: Any]?, canvas: (Double, Double))? {
+    let r = runCLI(["get"])
+    guard r.0 == 0, let j = jsonObj(r.1), let items = j["items"] as? [[String: Any]], let c = j["canvas"] as? [String: Any],
+          let w = numOf(c["width"]), let h = numOf(c["height"]) else { return nil }
+    return (items, j["editing"] as? Bool ?? false, j["background"] as? [String: Any], (w, h))
+}
+@discardableResult
+func agentDraw(_ ops: String) -> (Int32, [String: Any]?, String) {
+    let r = runCLI(["draw", "-"], stdin: #"{"version":1,"ops":["# + ops + "]}")
+    return (r.0, jsonObj(r.1), r.2)
+}
+func agentExportRep() -> (path: String, rep: NSBitmapImageRep)? {
+    let r = runCLI(["export"])
+    guard r.0 == 0, let p = jsonObj(r.1)?["path"] as? String, let rep = load(p) else { return nil }
+    return (p, rep)
+}
+let isRedPx = { (p: Px) in p.r > 0.8 && p.g < 0.4 && p.b < 0.4 }
+let agentIds = [
+    "G1 the socket is a socket owned by the user, mode 0600, in a 0700 directory",
+    "G2 draw adds a rect to the live canvas (one request, exit 0), and export shows it",
+    "G3 get returns the canvas size, the background, and the drawn item in the spec's shape",
+    "G4 one draw request is one undo step (Cmd+Z removes all of its items; Cmd+Shift+Z brings them back)",
+    "G5 clear removes the drawn items and keeps the background; a second clear says false and adds no undo step",
+    "G6 export returns the same file while nothing changed, and a new file after a change",
+    "G7 draw while a person is typing: the typed text stays, get says editing, export leaves it out, and the text lands above the agent's item",
+    "G8 draw while a person drags an item with the real mouse: the drag continues, nothing is lost, and undo goes in the order committed",
+    "G9 draw while the panel is hidden shows it again without taking focus from the frontmost app",
+    "G10 draw launches the app when it is not running (without taking focus), and a stale socket from a killed app is replaced",
+    "G11 a request that cannot reach the app exits 3 (unreachable); an invalid or oversized request exits 1 without touching the canvas",
+    "G12 a normal quit (terminate, not SIGTERM) ends the app within 5 s and removes its socket file",
+]
+var G11state: (Int32, Int32, Int?, Int?, Int, [String: Any]?)? = nil
+if agentSocketPath.utf8.count > 103 {
+    for id in agentIds { rec(id, "blocked", "socket path too long for this harness (\(agentSocketPath.utf8.count) bytes; the app uses a hashed name then)") }
+} else {
+    // G1
+    let sockAttrs = try? FileManager.default.attributesOfItem(atPath: agentSocketPath)
+    let dirAttrs = try? FileManager.default.attributesOfItem(atPath: (agentSocketPath as NSString).deletingLastPathComponent)
+    let sockMode = (sockAttrs?[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    let dirMode = (dirAttrs?[.posixPermissions] as? NSNumber)?.intValue ?? -1
+    let isSock = (sockAttrs?[.type] as? FileAttributeType) == .typeSocket
+    let mine = (sockAttrs?[.ownerAccountID] as? NSNumber)?.uint32Value == getuid()
+    rec(agentIds[0], (isSock && mine && sockMode == 0o600 && dirMode == 0o700) ? "pass" : "fail", "path=\(agentSocketPath) isSocket=\(isSock) ownedByMe=\(mine) mode=\(String(sockMode, radix: 8)) directory mode=\(String(dirMode, radix: 8))")
+
+    // G2・G3：clear で、これまでのケースの内容を空にしてから、四角を 1 つ足す
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    let baseline = agentExportRep()                  // 背景の画像（これまでのケースで読んだもの）だけの書き出し
+    let d1 = agentDraw(##"{"op":"rect","x":100,"y":100,"w":120,"h":60,"color":"#ff00ff","size":6}"##)
+    let g3 = agentGet()
+    if let g3 { canvasWidthPt = g3.canvas.0 }
+    if let ex = agentExportRep(), let base = baseline {
+        let edge = at(ex.rep, 100, 130), inside = at(ex.rep, 160, 130)
+        let same = { (a: Px, b: Px) in abs(a.r - b.r) < 0.05 && abs(a.g - b.g) < 0.05 && abs(a.b - b.b) < 0.05 }
+        let magenta = edge.r > 0.8 && edge.b > 0.8 && edge.g < 0.4
+        rec(agentIds[1], (d1.0 == 0 && d1.1?["added"] as? Int == 1 && magenta && !same(edge, at(base.rep, 100, 130)) && same(inside, at(base.rep, 160, 130))) ? "pass" : "fail",
+            "draw exit=\(d1.0) added=\(String(describing: d1.1?["added"])) stderr='\(d1.2)'; exported \(ex.path): rect edge magenta=\(magenta) (differs from the export before the draw: \(!same(edge, at(base.rep, 100, 130)))); interior unchanged=\(same(inside, at(base.rep, 160, 130)))")
+    } else { rec(agentIds[1], "blocked", "export failed") }
+    if let g3 {
+        let it = g3.items.first
+        let axSize = canvasFrame().map { ($0.width, $0.height) }
+        let sizeOK = axSize.map { abs($0.0 - g3.canvas.0) < 1 && abs($0.1 - g3.canvas.1) < 1 } ?? false
+        let shapeOK = g3.items.count == 1 && it?["op"] as? String == "rect" && it?["index"] as? Int == 0 && numOf(it?["x"]) == 100 && numOf(it?["y"]) == 100
+            && numOf(it?["w"]) == 120 && numOf(it?["h"]) == 60 && it?["color"] as? String == "#FF00FF" && numOf(it?["size"]) == 6
+        let bgOK = g3.background.map { (numOf($0["w"]) ?? 0) > 0 && (numOf($0["h"]) ?? 0) > 0 } ?? false
+        rec(agentIds[2], (sizeOK && shapeOK && bgOK && !g3.editing) ? "pass" : "fail",
+            "canvas=\(g3.canvas) (AX canvas \(String(describing: axSize))) item=\(String(describing: it)) background=\(String(describing: g3.background)) editing=\(g3.editing)")
+    } else { rec(agentIds[2], "blocked", "get failed") }
+
+    // G4：1 回の要求は取り消し 1 段（実キー）
+    if let why = keyGuard(pid, app) {
+        for i in [3] { rec(agentIds[i], "blocked", "keyboard guard: \(why)") }
+    } else {
+        agentDraw(##"{"op":"line","from":[300,50],"to":[420,150],"color":"#0000ff","size":5},{"op":"text","x":300,"y":220,"text":"AB","fontSize":32}"##)
+        let three = agentGet()?.items.count
+        key(6, .maskCommand)
+        let afterUndo = agentGet()?.items.count
+        key(6, [.maskCommand, .maskShift])
+        let afterRedo = agentGet()?.items.count
+        rec(agentIds[3], (three == 3 && afterUndo == 1 && afterRedo == 3) ? "pass" : "fail", "items after the 2-op draw=\(String(describing: three)); after one Cmd+Z=\(String(describing: afterUndo)) (expect 1); after Cmd+Shift+Z=\(String(describing: afterRedo)) (expect 3)")
+    }
+
+    // G5：clear
+    let c1 = jsonObj(runCLI(["clear"]).1)?["cleared"] as? Bool
+    let afterClear = agentGet()
+    let c2 = jsonObj(runCLI(["clear"]).1)?["cleared"] as? Bool
+    var restored: Int? = nil
+    if keyGuard(pid, app) == nil { key(6, .maskCommand); restored = agentGet()?.items.count }
+    rec(agentIds[4], (c1 == true && afterClear?.items.isEmpty == true && afterClear?.background != nil && c2 == false && restored == 3) ? "pass" : (restored == nil ? "blocked" : "fail"),
+        "first clear=\(String(describing: c1)); items after=\(String(describing: afterClear?.items.count)) background kept=\(afterClear?.background != nil); second clear=\(String(describing: c2)); items after one Cmd+Z=\(String(describing: restored)) (expect 3: the second clear made no undo step)")
+
+    // G6：export の再利用
+    let e1 = agentExportRep(), e2 = agentExportRep()
+    agentDraw(#"{"op":"rect","x":20,"y":20,"w":30,"h":30}"#)
+    let e3 = agentExportRep()
+    rec(agentIds[5], (e1 != nil && e1?.path == e2?.path && e3 != nil && e3?.path != e1?.path && e1?.path.hasPrefix("/tmp/shortnote/") == true) ? "pass" : "fail",
+        "export#1=\(e1?.path ?? "nil") export#2=\(e2?.path ?? "nil") (same expected) after a draw export#3=\(e3?.path ?? "nil") (different expected)")
+
+    // G7：人が文字を入力している間に draw
+    _ = runCLI(["clear"])
+    if keyGuard(pid, app) != nil {
+        rec(agentIds[6], "blocked", "keyboard guard")
+    } else if selectTool(Seg.text), click(pt(20, 230)), let ta = editorAreas().first {
+        _ = AXUIElementSetAttributeValue(ta, "AXValue" as CFString, "typing" as CFString)
+        let pre = agentGet()?.items.count ?? -1
+        let d = agentDraw(##"{"op":"rect","x":250,"y":100,"w":100,"h":60,"color":"#ff0000","size":6}"##)
+        let during = agentGet()
+        let stillOpen = editorAreas().count == 1, stillTyped = editorAreas().first.map { axs($0, "AXValue") } == "typing"
+        let exDuring = agentExportRep()
+        let textDuring = exDuring.map { countDark($0.rep, 20, 230, 120, 262) } ?? -1
+        let redDuring = exDuring.map { isRedPx(at($0.rep, 250, 130)) } ?? false
+        key(36, [])
+        let closed = wait(2) { editorAreas().isEmpty }
+        let after = agentGet()
+        let last = after?.items.last, first = after?.items.first
+        rec(agentIds[6], (d.0 == 0 && pre == 0 && during?.editing == true && during?.items.count == 1 && stillOpen && stillTyped && textDuring < 20 && redDuring && closed
+                          && after?.editing == false && after?.items.count == 2 && first?["op"] as? String == "rect" && last?["op"] as? String == "text" && last?["text"] as? String == "typing") ? "pass" : "fail",
+            "draw exit=\(d.0); while typing: editing=\(String(describing: during?.editing)) items=\(String(describing: during?.items.count)) editorOpen=\(stillOpen) editorValueKept=\(stillTyped); export while typing: text dark px=\(textDuring) (<20 expected) rect red=\(redDuring); after Return: editing=\(String(describing: after?.editing)) items=\(String(describing: after?.items.count)) first=\(String(describing: first?["op"])) last=\(String(describing: last?["op"])) text=\(String(describing: last?["text"]))")
+    } else { rec(agentIds[6], "blocked", "text tool select / click guard failed") }
+
+    // G8：人が移動のドラッグをしている間に draw（実機のポインタで、ボタンを押したまま）
+    _ = runCLI(["clear"])
+    agentDraw(##"{"op":"rect","x":60,"y":60,"w":80,"h":50,"color":"#ff0000","size":4}"##)
+    let grab = pt(100, 85)
+    if keyGuard(pid, app) != nil {
+        rec(agentIds[7], "blocked", "keyboard guard")
+    } else if selectTool(Seg.move), hitOwner(grab) == pid, hitOwner(pt(160, 85)) == pid {
+        post(.mouseMoved, grab); post(.leftMouseDown, grab)
+        for p in line(grab, pt(140, 85), steps: 10).dropFirst() { post(.leftMouseDragged, p) }
+        usleep(150_000)
+        let held = agentGet()                                            // ボタンを押したまま（確定していない）
+        let dd = agentDraw(##"{"op":"rect","x":300,"y":200,"w":60,"h":40,"color":"#0000ff","size":4}"##)
+        for p in line(pt(140, 85), pt(160, 85), steps: 10).dropFirst() { post(.leftMouseDragged, p) }
+        post(.leftMouseUp, pt(160, 85)); usleep(250_000)
+        let done = agentGet()
+        key(6, .maskCommand); let undo1 = agentGet()
+        key(6, .maskCommand); let undo2 = agentGet()
+        let heldX = numOf(held?.items.first?["x"]), movedX = numOf(done?.items.first(where: { $0["op"] as? String == "rect" && $0["color"] as? String == "#FF0000" })?["x"])
+        let backX = numOf(undo1?.items.first(where: { $0["color"] as? String == "#FF0000" })?["x"])
+        rec(agentIds[7], (held?.editing == true && heldX == 60 && dd.0 == 0 && done?.editing == false && done?.items.count == 2 && movedX.map { abs($0 - 120) <= 2 } == true
+                          && undo1?.items.count == 2 && backX == 60 && undo2?.items.count == 1) ? "pass" : "fail",
+            "while holding the button: editing=\(String(describing: held?.editing)) committed x of the dragged rect=\(String(describing: heldX)) (60 expected: not committed yet); draw exit=\(dd.0); after mouse-up: items=\(String(describing: done?.items.count)) dragged rect x=\(String(describing: movedX)) (about 120); after Cmd+Z: items=\(String(describing: undo1?.items.count)) x=\(String(describing: backX)) (2 items, x back to 60); after a 2nd Cmd+Z: items=\(String(describing: undo2?.items.count)) (1)")
+    } else { rec(agentIds[7], "blocked", "move tool select / pointer guard failed") }
+
+    // G11：不正・大きすぎる要求（アプリに触れない）
+    let beforeBad = agentGet()?.items.count
+    let bad = runCLI(["draw", "-"], stdin: #"{"version":1,"ops":[{"op":"rect","x":1,"y":1,"w":5,"h":5},{"op":"nope"}]}"#)
+    let bigFile = "\(work)/render/big-ops.json"
+    let onePen = "{\"op\":\"pen\",\"points\":[" + (0..<10_000).map { _ in "[100.5,200.5]" }.joined(separator: ",") + "]}"
+    try? ("{\"version\":1,\"ops\":[" + Array(repeating: onePen, count: 9).joined(separator: ",") + "]}").write(toFile: bigFile, atomically: true, encoding: .utf8)
+    let big = runCLI(["draw", bigFile])
+    let afterBad = agentGet()?.items.count
+    let bigSize = (try? FileManager.default.attributesOfItem(atPath: bigFile)[.size] as? Int) ?? 0
+    G11state = (bad.0, big.0, beforeBad, afterBad, bigSize, jsonObj(bad.2)?["error"] as? [String: Any])
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1065,6 +1228,7 @@ if keyGuard(pid, app) == nil {
     rec("C14 Esc hides panel", wait(2) { candWindow(pid) == nil } ? "pass" : "fail", "on-screen panel gone: \(candWindow(pid) == nil)")
 }
 
+
 // ---- 引数なしの起動でもウィンドウが出る（SPEC 3.1「起動したらすぐ描ける」）----
 // 常駐インスタンスがあると転送されて終了するので、先に最初の候補を（起動時刻と実行ファイルを照合して）終了する。
 // 保存したサイズが次回の起動で使われることを見るため、ここで 1280 × 720 を選んでから再起動する。
@@ -1074,6 +1238,10 @@ if firstStart == startTime { kill(pid, SIGTERM); _ = wait(3) { !proc.isRunning }
 if proc.isRunning {
     rec("C18 launch without arguments shows the panel", "blocked", "the first candidate did not exit; a resident instance would forward the launch")
 } else {
+    // G10・G11 の前半：落とした（SIGTERM）候補が残した、応答のないソケット。受け口が無いので、get は届かない（終了コード 3）
+    let staleBefore = FileManager.default.fileExists(atPath: agentSocketPath)
+    let unreachable = runCLI(["get"])
+    let unreachableBody = jsonObj(unreachable.2)?["error"] as? [String: Any]
     let p3 = Process(); p3.executableURL = URL(fileURLWithPath: buildExe)
     p3.standardOutput = FileHandle(forWritingAtPath: "/dev/null"); p3.standardError = FileHandle(forWritingAtPath: "/dev/null")
     try p3.run()
@@ -1082,13 +1250,70 @@ if proc.isRunning {
     let shown = wait(6) { candWindow(pid3) != nil }
     let b3 = candWindow(pid3).map { bounds($0) } ?? .zero
     rec("C18 launch without arguments shows the panel", shown ? "pass" : "fail", "pid \(pid3) on-screen 'ShortNote' window within 6s: \(shown) bounds \(b3)")
+    if shown, agentSocketPath.utf8.count <= 103 {
+        let g = runCLI(["get"])
+        rec("G10a a stale socket left by a killed app is replaced when the next app starts", (staleBefore && unreachable.0 == 3 && unreachableBody?["code"] as? String == "unreachable" && g.0 == 0 && jsonObj(g.1)?["items"] != nil) ? "pass" : "fail",
+            "before the launch: socket file exists=\(staleBefore), get exit=\(unreachable.0) error=\(String(describing: unreachableBody?["code"])) (3/unreachable expected); after the launch: get exit=\(g.0)")
+    }
     if shown, bundleIdOK {
         let el3 = AXUIElementCreateApplication(pid3)
         var cf3: CGRect? = nil; _ = wait(5) { cf3 = canvasFrame(el3); return cf3 != nil }
         let okSize = cf3.map { abs($0.width - 640) < 1 && abs($0.height - 360) < 1 } ?? false
         rec("S6 the saved canvas size is applied on the next launch", okSize ? "pass" : "fail", "relaunched candidate canvas \(cf3.map { "\(Int($0.width))x\(Int($0.height))" } ?? "unavailable") pt (expect 640x360 = 1280x720 px)")
     }
-    if sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == start3 { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
+    // G12：普通の終了（Cmd+Q と同じ、終了の要求）。アプリが終わり（終了処理で固まらない）、ソケットのファイルが消える
+    if sh(["ps", "-p", "\(pid3)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == start3 {
+        let before = FileManager.default.fileExists(atPath: agentSocketPath)
+        NSRunningApplication(processIdentifier: pid3)?.terminate()
+        let exited = wait(5) { !p3.isRunning }
+        let removed = !FileManager.default.fileExists(atPath: agentSocketPath)
+        if agentSocketPath.utf8.count <= 103 { rec(agentIds[11], (before && exited && removed) ? "pass" : "fail", "socket file existed before the quit=\(before); app exited within 5 s=\(exited); socket file removed=\(removed)") }
+        if p3.isRunning { kill(pid3, SIGTERM); _ = wait(3) { !p3.isRunning } }
+    } else if agentSocketPath.utf8.count <= 103 { rec(agentIds[11], "blocked", "the relaunched candidate could not be identified by its start time") }
+    // G10：アプリが動いていないとき、draw が起動する（フォーカスを奪わない）
+    if agentSocketPath.utf8.count <= 103, let o = prevFront, o.processIdentifier != pid {
+        _ = wait(3) { NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty }
+        let none = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+        o.activate(options: [])
+        _ = wait(3) { NSWorkspace.shared.frontmostApplication?.processIdentifier == o.processIdentifier }
+        let d = agentDraw(##"{"op":"rect","x":20,"y":20,"w":60,"h":40,"color":"#ff0000","size":5}"##)
+        let launched = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first
+        let lp = launched?.processIdentifier ?? -1
+        let lexe = lp > 0 ? sh(["ps", "-p", "\(lp)", "-o", "comm="]).1.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let lstart = lp > 0 ? sh(["ps", "-p", "\(lp)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) : ""
+        let shown4 = lp > 0 && wait(5) { candWindow(lp) != nil }
+        let front = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let g = lp > 0 ? agentGet() : nil
+        rec(agentIds[9], (none && d.0 == 0 && d.1?["added"] as? Int == 1 && lexe == buildExe && shown4 && front == o.processIdentifier && g?.items.count == 1) ? "pass" : "fail",
+            "no instance before=\(none); draw exit=\(d.0) reply=\(String(describing: d.1)) stderr='\(d.2)'; launched pid=\(lp) exe==candidate=\(lexe == buildExe); its panel on screen=\(shown4); frontmost after=\(front.map { String($0) } ?? "nil") (previous app \(o.processIdentifier) expected); get items=\(String(describing: g?.items.count))")
+        // G9：この候補は、前面ではない（draw が前面にしなかった）。パネルを閉じて隠してから、もう一度 draw する。パネルは戻り、フォーカスは動かない。
+        if lp > 0, shown4, front == o.processIdentifier {
+            let bg = AXUIElementCreateApplication(lp)
+            let panelEl = (ax(bg, "AXWindows") as? [AXUIElement])?.first(where: { axs($0, "AXTitle") == "ShortNote" })
+            let closeButton = panelEl.flatMap { ax($0, "AXCloseButton") }.map { $0 as! AXUIElement }
+            var closed = false
+            if let closeButton { _ = AXUIElementPerformAction(closeButton, kAXPressAction as CFString); closed = wait(3) { candWindow(lp) == nil } }
+            if !closed {
+                rec(agentIds[8], "blocked", "could not close the background candidate's panel through Accessibility (close button found: \(closeButton != nil))")
+            } else {
+                let d2 = agentDraw(##"{"op":"rect","x":20,"y":20,"w":30,"h":30}"##)
+                let back = wait(3) { candWindow(lp) != nil }
+                let front2 = NSWorkspace.shared.frontmostApplication?.processIdentifier
+                let active = NSRunningApplication(processIdentifier: lp)?.isActive ?? true
+                rec(agentIds[8], (d2.0 == 0 && back && front2 == o.processIdentifier && !active) ? "pass" : "fail",
+                    "the candidate (pid \(lp)) was in the background; its panel was closed; draw exit=\(d2.0); panel on screen again=\(back); frontmost after=\(front2.map { String($0) } ?? "nil") (previous app \(o.processIdentifier) expected); candidate active=\(active) (false expected)")
+            }
+        } else { rec(agentIds[8], "blocked", "no background candidate (the launch case did not pass)") }
+        // 後片付け：この実行で起動した候補だけを、起動時刻と実行ファイルを照合して終わらせる
+        if lp > 0, sh(["ps", "-p", "\(lp)", "-o", "lstart="]).1.trimmingCharacters(in: .whitespacesAndNewlines) == lstart, lexe == buildExe {
+            kill(lp, SIGTERM); _ = wait(3) { NSRunningApplication(processIdentifier: lp) == nil || NSRunningApplication(processIdentifier: lp)?.isTerminated == true }
+        }
+    } else { rec(agentIds[9], "blocked", "no other frontmost app recorded, or the socket path is too long") }
+    if let s = G11state {
+        // G11：届かない（終了コード 3、上の G10a の前）と、不正・大きすぎる要求（終了コード 1、キャンバスは変わらない）
+        rec(agentIds[10], (unreachable.0 == 3 && s.0 == 1 && s.1 == 1 && s.2 == s.3 && s.2 != nil && s.4 > 1 << 20 && s.5?["code"] as? String == "invalid_ops" && s.5?["op"] as? Int == 1) ? "pass" : "fail",
+            "get with no app: exit=\(unreachable.0) (3 expected); invalid op: exit=\(s.0) error=\(String(describing: s.5)); a \(s.4)-byte request: exit=\(s.1) (1 expected); items before/after the two bad requests=\(String(describing: s.2))/\(String(describing: s.3)) (equal expected)")
+    } else { rec(agentIds[10], "blocked", "the live cases did not run") }
 }
 
 finish()
