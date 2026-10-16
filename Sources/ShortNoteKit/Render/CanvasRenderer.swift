@@ -121,6 +121,10 @@ enum CanvasRenderer {
             ctx.setLineWidth(item.size)
             ctx.move(to: a)
             ctx.addLine(to: b)
+            for head in Arrowhead.segments(from: a, to: b, size: item.size, arrow: item.arrow) {   // 矢じり：端から外側へ、2 本の線
+                ctx.move(to: head.tip)
+                ctx.addLine(to: head.end)
+            }
             ctx.strokePath()
         case .pen(let points):
             drawStroke(points, size: item.size, in: ctx)

@@ -16,6 +16,10 @@ final class Toolbar: NSObject {
     var onClear: (() -> Void)?
     /// 円・四角の描き方（枠だけ／塗りつぶし）が選ばれた。選んだツールへの切り替えも、`onSelectTool` で別に知らせる。
     var onSelectFill: ((Tool, Bool) -> Void)?
+    /// 直線の矢じり（線・矢印・両端の矢印）が選ばれた。直線のツールへの切り替えも、`onSelectTool` で別に知らせる。
+    var onSelectArrow: ((Item.Arrow) -> Void)?
+    /// 直線で選んでいる矢じり。ボタンの絵とメニューのチェックに使う。保存しない。
+    private var lineArrow: Item.Arrow = .none
     /// 塗りつぶしを選んでいるツール（円・四角）。ボタンの絵とメニューのチェックに使う。保存しない。
     private var filledTools: Set<Tool> = []
     var fileProvider: (() -> URL?)? {
@@ -26,7 +30,7 @@ final class Toolbar: NSObject {
     private(set) lazy var topRow: NSStackView = {
         let row = NSStackView(views: [tools, pickButton, colorWell, slider, textSizePopup, transparentCheckbox])
         row.orientation = .horizontal
-        row.spacing = 8
+        row.spacing = 6
         row.alignment = .centerY
         return row
     }()
@@ -67,6 +71,9 @@ final class Toolbar: NSObject {
             control.setMenu(fillMenu(for: tool), forSegment: tool.rawValue)
             control.setShowsMenuIndicator(true, forSegment: tool.rawValue)
         }
+        // 直線のボタンにも、「線／矢印／両端の矢印」のメニュー（同じ形）
+        control.setMenu(arrowMenu(), forSegment: Tool.line.rawValue)
+        control.setShowsMenuIndicator(true, forSegment: Tool.line.rawValue)
         return control
     }()
 
@@ -83,7 +90,7 @@ final class Toolbar: NSObject {
     private lazy var slider: NSSlider = {
         let slider = NSSlider(value: 4, minValue: Double(Self.brushRange.lowerBound), maxValue: Double(Self.brushRange.upperBound), target: self, action: #selector(sizeChanged(_:)))
         slider.refusesFirstResponder = true
-        slider.widthAnchor.constraint(equalToConstant: 64).isActive = true
+        slider.widthAnchor.constraint(equalToConstant: 60).isActive = true
         return slider
     }()
 
@@ -174,6 +181,60 @@ final class Toolbar: NSObject {
         onSelectFill?(tool, filled)
         onSelectTool?(tool)
     }
+
+    // MARK: - 直線の矢じり
+
+    /// メニューの項目：題と、矢じり。
+    private static let arrowChoices: [(title: String, arrow: Item.Arrow)] = [("線", .none), ("矢印", .end), ("両端の矢印", .both)]
+
+    /// 絵。線は `line.diagonal`、矢印は `line.diagonal.arrow`（どちらも 14×13）。両端の矢印は、矢印の絵を 180° 回して重ねたもの（同じ 14×13。
+    /// ボタンの幅が、どの選びでも変わらない。`arrow.up.left.and.arrow.down.right` は 16×15 で、ボタンが 2 pt 広がり、ツールバーの最小幅に、2 pt の余裕しかなかった）。
+    static func arrowImage(_ arrow: Item.Arrow) -> NSImage? {
+        guard let line = NSImage(systemSymbolName: "line.diagonal", accessibilityDescription: nil),
+              let single = NSImage(systemSymbolName: "line.diagonal.arrow", accessibilityDescription: nil) else { return nil }
+        switch arrow {
+        case .none: return line
+        case .end: return single
+        case .both:
+            let both = NSImage(size: single.size, flipped: false) { rect in
+                single.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+                ctx.translateBy(x: rect.midX, y: rect.midY)
+                ctx.rotate(by: .pi)
+                ctx.translateBy(x: -rect.midX, y: -rect.midY)
+                single.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                return true
+            }
+            both.isTemplate = true   // 色は、ボタン・メニューの色に合わせる
+            return both
+        }
+    }
+
+    private func arrowMenu() -> NSMenu {
+        let menu = NSMenu(title: "直線")
+        for (index, choice) in Self.arrowChoices.enumerated() {
+            let item = NSMenuItem(title: choice.title, action: #selector(arrowChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.tag = index
+            item.image = Self.arrowImage(choice.arrow)
+            item.state = choice.arrow == lineArrow ? .on : .off
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    /// メニューから選んだ。ボタンの絵とチェックを直し、直線のツールに切り替える。
+    @objc private func arrowChosen(_ sender: NSMenuItem) {
+        guard Self.arrowChoices.indices.contains(sender.tag) else { return }
+        lineArrow = Self.arrowChoices[sender.tag].arrow
+        tools.setImage(Self.arrowImage(lineArrow), forSegment: Tool.line.rawValue)
+        if let menu = tools.menu(forSegment: Tool.line.rawValue) {
+            for item in menu.items { item.state = item.tag == sender.tag ? .on : .off }
+        }
+        tools.selectedSegment = Tool.line.rawValue
+        onSelectArrow?(lineArrow)
+        onSelectTool?(.line)
+    }
     func show(brushSize: CGFloat) { slider.doubleValue = Double(brushSize) }
     func show(textSize: CGFloat) {
         if let index = TextSize.presets.firstIndex(of: textSize) { textSizePopup.selectItem(at: index) }
@@ -192,7 +253,8 @@ final class Toolbar: NSObject {
         let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("直線", .toolLine), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove)]
         for (i, entry) in toolCommands.enumerated() {
             let base = hint(entry.0, entry.1)
-            tools.setToolTip(Self.fillTools.contains(where: { $0.rawValue == i }) ? base + "　押し続けると、枠だけ／塗りつぶしを選べる" : base, forSegment: i)
+            let extra = Self.fillTools.contains(where: { $0.rawValue == i }) ? "　押し続けると、枠だけ／塗りつぶしを選べる" : (i == Tool.line.rawValue ? "　押し続けると、線／矢印／両端の矢印を選べる" : "")
+            tools.setToolTip(base + extra, forSegment: i)
         }
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)
