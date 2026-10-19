@@ -2,7 +2,7 @@ import Foundation
 
 /// 設定画面でのグルーピング単位。
 enum CommandGroup: CaseIterable {
-    case window, edit, image, tool, brush
+    case window, edit, image, tool, view, brush
 }
 
 /// キーボードショートカットで呼び出せる操作。rawValue は永続化のキーなので変更しないこと。
@@ -10,7 +10,8 @@ enum Command: String, CaseIterable, Codable, Hashable {
     case showPanel, hidePanel
     case undo, redo, clearCanvas
     case pasteImage, openImage, copyPath
-    case toolPen, toolLine, toolEllipse, toolRect, toolText, toolMove, toolTriangle
+    case toolPen, toolLine, toolEllipse, toolRect, toolText, toolMove, toolTriangle, toolHand
+    case viewReset
     case brushSmaller, brushLarger
 
     var title: String {
@@ -30,6 +31,8 @@ enum Command: String, CaseIterable, Codable, Hashable {
         case .toolMove: return "ツール: 移動"
         case .toolLine: return "ツール: 直線"
         case .toolTriangle: return "ツール: 三角"
+        case .toolHand: return "ツール: ハンド"
+        case .viewReset: return "ビューを等倍に戻す"
         case .brushSmaller: return "ブラシを細く"
         case .brushLarger: return "ブラシを太く"
         }
@@ -43,7 +46,8 @@ enum Command: String, CaseIterable, Codable, Hashable {
         case .showPanel, .hidePanel: return .window
         case .undo, .redo, .clearCanvas: return .edit
         case .pasteImage, .openImage, .copyPath: return .image
-        case .toolPen, .toolEllipse, .toolRect, .toolText, .toolMove, .toolLine, .toolTriangle: return .tool
+        case .toolPen, .toolEllipse, .toolRect, .toolText, .toolMove, .toolLine, .toolTriangle, .toolHand: return .tool
+        case .viewReset: return .view
         case .brushSmaller, .brushLarger: return .brush
         }
     }

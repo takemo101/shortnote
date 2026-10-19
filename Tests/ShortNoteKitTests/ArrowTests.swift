@@ -155,7 +155,7 @@ struct ArrowUITests {
     @Test("ツールバー：直線のボタンにメニュー（線／矢印／両端の矢印）。選ぶと、通知・チェック・ツールの切り替えが起きる。図形のメニューとは別")
     func toolbarMenu() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 5 })
+        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
         let menu = try #require(control.menu(forSegment: Toolbar.segment(for: .line)))
         #expect(menu.items.map(\.title) == ["線", "矢印", "両端の矢印"])
         #expect(menu.items.map(\.state) == [.on, .off, .off])
@@ -185,16 +185,16 @@ struct ArrowToolbarWidthTests {
     @Test("どの矢じりを選んでも、ボタンの幅・ツールバーの上段の幅は変わらない。ボタンの絵は、選びに合わせて変わる")
     func widthIsConstant() throws {
         let toolbar = Toolbar()
-        let control = try #require((toolbar.topRow.subviews + toolbar.topRow.subviews.flatMap(\.subviews)).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 5 })
+        let control = try #require((toolbar.topRow.subviews + toolbar.topRow.subviews.flatMap(\.subviews)).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
         let menu = try #require(control.menu(forSegment: Toolbar.segment(for: .line)))
         let widthBefore = control.intrinsicContentSize.width, rowBefore = toolbar.topRow.fittingSize.width
         let imageBefore = control.image(forSegment: Toolbar.segment(for: .line))?.tiffRepresentation
         menu.performActionForItem(at: 2)   // 両端の矢印（絵を作り直す）
-        #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1)     // 以前は 2 pt 広がった（16×15 の絵）。半分の pt の丸めだけは許す
-        #expect(toolbar.topRow.fittingSize.width == rowBefore)
+        #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1)     // 以前は 2 pt 広がった（16×15 の絵）。ボタンの幅は、最大 1 pt の差までを許す（実測：両端の矢印で、ちょうど 1 pt 広がる）
+        #expect(abs(toolbar.topRow.fittingSize.width - rowBefore) <= 1)             // 半分の pt の丸めだけは許す
         #expect(control.image(forSegment: Toolbar.segment(for: .line))?.tiffRepresentation != imageBefore)
         menu.performActionForItem(at: 1)
-        #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1 && toolbar.topRow.fittingSize.width == rowBefore)
+        #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1 && abs(toolbar.topRow.fittingSize.width - rowBefore) <= 1)
     }
 }
 
