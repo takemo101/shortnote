@@ -1,8 +1,8 @@
 import AppKit
 
-/// 描画ツール。`rawValue` は、ツールバーのセグメントの番号（左から）。キーの番号（1〜6）とは別で、並びは SPEC §4 のとおり。
-enum Tool: Int, CaseIterable {
-    case pen, line, ellipse, rect, text, move
+/// 描画ツール。ツールバーのボタンの並び（ペン／直線／図形／文字／移動）とは別で、円・四角・三角は、「図形」のボタン 1 つにまとまる（`Toolbar`）。
+enum Tool: CaseIterable {
+    case pen, line, ellipse, rect, triangle, text, move
 }
 
 /// キャンバス。ポインタ入力を、`Document` の変更（履歴つき）につなぐ。描画は `CanvasRenderer`、文字入力は `InlineTextEditor` が行う。
@@ -21,9 +21,10 @@ final class CanvasView: NSView {
     }
     var color: NSColor = .black
     var brushSize: CGFloat = 4
-    /// 円・四角を、枠だけにするか、塗りつぶすか（円と四角で別々。保存しない。SPEC §3.2.2）。
+    /// 円・四角・三角を、枠だけにするか、塗りつぶすか（図形ごとに別々。保存しない。SPEC §3.2.2）。
     var fillEllipse = false
     var fillRect = false
+    var fillTriangle = false
     /// 直線の矢じり（線・矢印・両端の矢印。保存しない。SPEC §3.2.2）。
     var lineArrow: Item.Arrow = .none
     /// 文字サイズ（ブラシサイズとは別）。入力中に変えると、入力中の文字の大きさも変わる。
@@ -295,6 +296,8 @@ final class CanvasView: NSView {
             draft = Item(content: .ellipse(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillEllipse)
         case .rect:
             draft = Item(content: .rect(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillRect)
+        case .triangle:
+            draft = Item(content: .triangle(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillTriangle)
         case .line:
             draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize, arrow: lineArrow)
         case .text:
@@ -387,6 +390,8 @@ final class CanvasView: NSView {
             draft?.content = .ellipse(dragRect(to: p))
         case .rect:
             draft?.content = .rect(dragRect(to: p))
+        case .triangle:
+            draft?.content = .triangle(dragRect(to: p))
         case .line(let from, _):
             draft?.content = .line(from: from, to: p)
         case .text, .image:
@@ -420,7 +425,7 @@ final class CanvasView: NSView {
         guard let item = draft else { return }
         draft = nil
         switch item.content {
-        case .ellipse(let r), .rect(let r):
+        case .ellipse(let r), .rect(let r), .triangle(let r):
             guard r.width >= 1, r.height >= 1 else { needsDisplay = true; return }   // 大きさのない図形は捨てる
         case .line(let a, let b):
             guard hypot(b.x - a.x, b.y - a.y) >= 1 else { needsDisplay = true; return }   // 大きさのない直線は捨てる

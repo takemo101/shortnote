@@ -56,7 +56,12 @@ final class PaintWindowController: NSObject {
         toolbar.show(textSize: canvas.textSize)
         toolbar.onSelectTool = { [weak self] tool in self?.canvas.tool = tool }
         toolbar.onSelectFill = { [weak self] tool, filled in
-            if tool == .ellipse { self?.canvas.fillEllipse = filled } else if tool == .rect { self?.canvas.fillRect = filled }
+            switch tool {
+            case .ellipse: self?.canvas.fillEllipse = filled
+            case .rect: self?.canvas.fillRect = filled
+            case .triangle: self?.canvas.fillTriangle = filled
+            default: break
+            }
         }
         toolbar.onSelectArrow = { [weak self] arrow in self?.canvas.lineArrow = arrow }
         toolbar.onColor = { [weak self] color in self?.canvas.color = color }
@@ -158,6 +163,7 @@ final class PaintWindowController: NSObject {
         case .toolPen: select(.pen)
         case .toolEllipse: select(.ellipse)
         case .toolRect: select(.rect)
+        case .toolTriangle: select(.triangle)
         case .toolText: select(.text)
         case .toolMove: select(.move)
         case .toolLine: select(.line)

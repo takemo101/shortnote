@@ -20,6 +20,8 @@ struct Item {
         case line(from: CGPoint, to: CGPoint)
         case ellipse(CGRect)
         case rect(CGRect)
+        /// 二等辺三角形。頂点は上辺の中央、底辺は下辺（`CGRect` に内接。描く向きは、上が頂点）。
+        case triangle(CGRect)
         case text(String, box: CGRect)
         case image(ImportedImage, box: CGRect)
     }
@@ -28,9 +30,9 @@ struct Item {
     var color: CGColor
     /// ペンと図形では線の太さ、文字では文字の大きさ。画像では使わない。
     var size: CGFloat
-    /// 円・四角で、枠の内側を、色で塗りつぶすか。ほかの要素では使わない（`false`）。
+    /// 円・四角・三角で、枠の内側を、色で塗りつぶすか。ほかの要素では使わない（`false`）。
     var filled = false
-    /// 回転角（ラジアン。時計回りが正。`(-π, π]`）。枠の中心が軸。円・四角・画像・文字だけが持つ（ペン・直線は、点そのものを回すので、常に 0）。
+    /// 回転角（ラジアン。時計回りが正。`(-π, π]`）。枠の中心が軸。円・四角・三角・画像・文字だけが持つ（ペン・直線は、点そのものを回すので、常に 0）。
     var rotation: CGFloat = 0
     /// 直線の矢じり（`none`・`end`＝終点・`both`＝両端）。直線だけが持つ（ほかの要素では `none`）。SPEC §3.2.2。
     var arrow: Arrow = .none
@@ -66,7 +68,7 @@ struct Item {
                 minY = min(minY, p.point.y); maxY = max(maxY, p.point.y)
             }
             return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY).insetBy(dx: -size / 2, dy: -size / 2)
-        case .ellipse(let rect), .rect(let rect):
+        case .ellipse(let rect), .rect(let rect), .triangle(let rect):
             return rect.insetBy(dx: -size / 2, dy: -size / 2)
         case .text(_, let box), .image(_, let box):
             return box
@@ -85,6 +87,8 @@ struct Item {
             item.content = .ellipse(rect.offsetBy(dx: d.width, dy: d.height))
         case .rect(let rect):
             item.content = .rect(rect.offsetBy(dx: d.width, dy: d.height))
+        case .triangle(let rect):
+            item.content = .triangle(rect.offsetBy(dx: d.width, dy: d.height))
         case .text(let text, let box):
             item.content = .text(text, box: box.offsetBy(dx: d.width, dy: d.height))
         case .image(let image, let box):
@@ -99,7 +103,7 @@ struct Item {
         switch (content, other.content) {
         case (.pen(let a), .pen(let b)): return a == b
         case (.line(let a1, let a2), .line(let b1, let b2)): return a1 == b1 && a2 == b2
-        case (.ellipse(let a), .ellipse(let b)), (.rect(let a), .rect(let b)): return a == b
+        case (.ellipse(let a), .ellipse(let b)), (.rect(let a), .rect(let b)), (.triangle(let a), .triangle(let b)): return a == b
         case (.text(let s, let a), .text(let t, let b)): return s == t && a == b
         case (.image(_, let a), .image(_, let b)): return a == b
         default: return false

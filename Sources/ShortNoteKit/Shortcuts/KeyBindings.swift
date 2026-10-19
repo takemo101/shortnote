@@ -44,6 +44,7 @@ struct KeyBindings: Equatable {
             .toolText: [chord(21, "4")],
             .toolMove: [chord(23, "5")],
             .toolLine: [chord(22, "6")],
+            .toolTriangle: [chord(26, "7")],
             .brushSmaller: [chord(bracketKeyCodes.smaller, "[")],
             .brushLarger: [chord(bracketKeyCodes.larger, "]")],
         ]

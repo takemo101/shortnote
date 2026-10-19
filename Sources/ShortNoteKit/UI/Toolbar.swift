@@ -14,14 +14,17 @@ final class Toolbar: NSObject {
     var onPickImages: (() -> Void)?
     var onCopyPath: (() -> Void)?
     var onClear: (() -> Void)?
-    /// 円・四角の描き方（枠だけ／塗りつぶし）が選ばれた。選んだツールへの切り替えも、`onSelectTool` で別に知らせる。
+    /// 図形（円・四角・三角）の描き方（枠だけ／塗りつぶし）が選ばれた。選んだツールへの切り替えも、`onSelectTool` で別に知らせる。
     var onSelectFill: ((Tool, Bool) -> Void)?
     /// 直線の矢じり（線・矢印・両端の矢印）が選ばれた。直線のツールへの切り替えも、`onSelectTool` で別に知らせる。
     var onSelectArrow: ((Item.Arrow) -> Void)?
     /// 直線で選んでいる矢じり。ボタンの絵とメニューのチェックに使う。保存しない。
     private var lineArrow: Item.Arrow = .none
-    /// 塗りつぶしを選んでいるツール（円・四角）。ボタンの絵とメニューのチェックに使う。保存しない。
+    /// 「図形」のボタンが、いま表す図形（円・四角・三角）。ボタンの絵とメニューの印に使う。保存しない。
+    private var shapeTool: Tool = .ellipse
+    /// 塗りつぶしを選んでいる図形。ボタンの絵とメニューの印に使う。保存しない。
     private var filledTools: Set<Tool> = []
+    private let shapeMenuView = ShapeMenuView()
     var fileProvider: (() -> URL?)? {
         get { handle.fileProvider }
         set { handle.fileProvider = newValue }
@@ -58,22 +61,28 @@ final class Toolbar: NSObject {
         return button
     }()
 
+    /// ボタンの並び（左から）。円・四角・三角は、「図形」の 1 つにまとまる。
+    private static let segmentOrder: [[Tool]] = [[.pen], [.line], ShapeMenuView.shapes, [.text], [.move]]
+
+    static func segment(for tool: Tool) -> Int {
+        segmentOrder.firstIndex { $0.contains(tool) } ?? 0
+    }
+
     private lazy var tools: NSSegmentedControl = {
-        let symbols = ["pencil.tip", "line.diagonal", "circle", "square", "textformat", "arrow.up.and.down.and.arrow.left.and.right"]
+        let symbols = ["pencil.tip", "line.diagonal", "circle", "textformat", "arrow.up.and.down.and.arrow.left.and.right"]
         let control = NSSegmentedControl(
             images: symbols.map { NSImage(systemSymbolName: $0, accessibilityDescription: nil) ?? NSImage() },
             trackingMode: .selectOne, target: self, action: #selector(toolChanged(_:))
         )
         control.selectedSegment = 0
+        control.setImage(ShapeMenuView.buttonImage(for: .ellipse, filled: false), forSegment: Self.segment(for: .ellipse))   // 起動のときは、枠だけの円
         control.refusesFirstResponder = true
-        // 円・四角のボタンに、「枠だけ／塗りつぶし」のメニュー（押し続けると開く。目印が出る）。普通に押すと、ツールの選択だけ。右クリックでは開かない（実験で確認）。
-        for tool in Self.fillTools {
-            control.setMenu(fillMenu(for: tool), forSegment: tool.rawValue)
-            control.setShowsMenuIndicator(true, forSegment: tool.rawValue)
-        }
+        // 図形のボタンに、2 列 × 3 行のメニュー（押し続けると開く。目印が出る）。普通に押すと、ツールの選択だけ。右クリックでは開かない（実験で確認）。
+        control.setMenu(shapeMenu(), forSegment: Self.segment(for: .ellipse))
+        control.setShowsMenuIndicator(true, forSegment: Self.segment(for: .ellipse))
         // 直線のボタンにも、「線／矢印／両端の矢印」のメニュー（同じ形）
-        control.setMenu(arrowMenu(), forSegment: Tool.line.rawValue)
-        control.setShowsMenuIndicator(true, forSegment: Tool.line.rawValue)
+        control.setMenu(arrowMenu(), forSegment: Self.segment(for: .line))
+        control.setShowsMenuIndicator(true, forSegment: Self.segment(for: .line))
         return control
     }()
 
@@ -137,47 +146,41 @@ final class Toolbar: NSObject {
         clearButton.action = #selector(clearCanvas)
     }
 
-    /// 表示を、いまの状態に合わせる（キーボードで切り替えたときにも使う）。
-    func show(tool: Tool) { tools.selectedSegment = tool.rawValue }
-
-    // MARK: - 円・四角の塗りつぶし
-
-    static let fillTools: [Tool] = [.ellipse, .rect]
-
-    /// ボタンの絵：枠だけは `circle`・`square`、塗りつぶしは `circle.fill`・`square.fill`。
-    private static func symbol(for tool: Tool, filled: Bool) -> String {
-        switch (tool, filled) {
-        case (.ellipse, false): return "circle"
-        case (.ellipse, true): return "circle.fill"
-        case (.rect, false): return "square"
-        case (.rect, true): return "square.fill"
-        default: return ""
+    /// 表示を、いまの状態に合わせる（キーボードで切り替えたときにも使う）。図形のツールなら、「図形」のボタンが、その図形になる。
+    func show(tool: Tool) {
+        if ShapeMenuView.shapes.contains(tool) {
+            shapeTool = tool
+            refreshShapeButton()
         }
+        tools.selectedSegment = Self.segment(for: tool)
     }
 
-    private func fillMenu(for tool: Tool) -> NSMenu {
-        let menu = NSMenu(title: tool == .ellipse ? "円" : "四角")
-        for (title, filled) in [("枠だけ", false), ("塗りつぶし", true)] {
-            let item = NSMenuItem(title: title, action: #selector(fillChosen(_:)), keyEquivalent: "")
-            item.target = self
-            item.tag = tool.rawValue * 2 + (filled ? 1 : 0)
-            item.image = NSImage(systemSymbolName: Self.symbol(for: tool, filled: filled), accessibilityDescription: title)
-            item.state = filled == filledTools.contains(tool) ? .on : .off
-            menu.addItem(item)
-        }
+    // MARK: - 図形（円・四角・三角）と塗りつぶし
+
+    private func shapeMenu() -> NSMenu {
+        let menu = NSMenu(title: "図形")
+        let item = NSMenuItem()
+        shapeMenuView.onChoose = { [weak self] tool, filled in self?.shapeChosen(tool, filled: filled) }
+        shapeMenuView.show(tool: shapeTool, filled: filledTools.contains(shapeTool))
+        item.view = shapeMenuView
+        menu.addItem(item)
         return menu
     }
 
-    /// メニューから選んだ。ボタンの絵とチェックを直し、そのツールに切り替える。
-    @objc private func fillChosen(_ sender: NSMenuItem) {
-        guard let tool = Tool(rawValue: sender.tag / 2), Self.fillTools.contains(tool) else { return }
-        let filled = sender.tag % 2 == 1
+    /// ボタンの絵と、メニューの印を、いまの選びに合わせる。
+    private func refreshShapeButton() {
+        let filled = filledTools.contains(shapeTool)
+        tools.setImage(ShapeMenuView.buttonImage(for: shapeTool, filled: filled), forSegment: Self.segment(for: shapeTool))
+        shapeMenuView.show(tool: shapeTool, filled: filled)
+    }
+
+    /// メニューから選んだ。図形と描き方を決め、ボタンの絵と印を直し、その図形のツールに切り替える。
+    private func shapeChosen(_ tool: Tool, filled: Bool) {
+        guard ShapeMenuView.shapes.contains(tool) else { return }
+        shapeTool = tool
         if filled { filledTools.insert(tool) } else { filledTools.remove(tool) }
-        tools.setImage(NSImage(systemSymbolName: Self.symbol(for: tool, filled: filled), accessibilityDescription: nil), forSegment: tool.rawValue)
-        if let menu = tools.menu(forSegment: tool.rawValue) {
-            for item in menu.items { item.state = (item.tag % 2 == 1) == filled ? .on : .off }
-        }
-        tools.selectedSegment = tool.rawValue
+        refreshShapeButton()
+        tools.selectedSegment = Self.segment(for: tool)
         onSelectFill?(tool, filled)
         onSelectTool?(tool)
     }
@@ -227,11 +230,12 @@ final class Toolbar: NSObject {
     @objc private func arrowChosen(_ sender: NSMenuItem) {
         guard Self.arrowChoices.indices.contains(sender.tag) else { return }
         lineArrow = Self.arrowChoices[sender.tag].arrow
-        tools.setImage(Self.arrowImage(lineArrow), forSegment: Tool.line.rawValue)
-        if let menu = tools.menu(forSegment: Tool.line.rawValue) {
+        let lineSegment = Self.segment(for: .line)
+        tools.setImage(Self.arrowImage(lineArrow), forSegment: lineSegment)
+        if let menu = tools.menu(forSegment: lineSegment) {
             for item in menu.items { item.state = item.tag == sender.tag ? .on : .off }
         }
-        tools.selectedSegment = Tool.line.rawValue
+        tools.selectedSegment = lineSegment
         onSelectArrow?(lineArrow)
         onSelectTool?(.line)
     }
@@ -250,12 +254,16 @@ final class Toolbar: NSObject {
             let keys = center.chords(for: command).map(\.displayString).joined(separator: " / ")
             return keys.isEmpty ? title : "\(title)（\(keys)）"
         }
-        let toolCommands: [(String, Command)] = [("ペン", .toolPen), ("直線", .toolLine), ("円", .toolEllipse), ("四角", .toolRect), ("文字", .toolText), ("移動", .toolMove)]
-        for (i, entry) in toolCommands.enumerated() {
-            let base = hint(entry.0, entry.1)
-            let extra = Self.fillTools.contains(where: { $0.rawValue == i }) ? "　押し続けると、枠だけ／塗りつぶしを選べる" : (i == Tool.line.rawValue ? "　押し続けると、線／矢印／両端の矢印を選べる" : "")
-            tools.setToolTip(base + extra, forSegment: i)
-        }
+        tools.setToolTip(hint("ペン", .toolPen), forSegment: Self.segment(for: .pen))
+        tools.setToolTip(hint("直線", .toolLine) + "　押し続けると、線／矢印／両端の矢印を選べる", forSegment: Self.segment(for: .line))
+        let shapeKeys = [("円", Command.toolEllipse), ("四角", .toolRect), ("三角", .toolTriangle)]
+            .map { entry -> String in
+                let keys = center.chords(for: entry.1).map(\.displayString).joined(separator: " / ")
+                return keys.isEmpty ? entry.0 : "\(entry.0) \(keys)"
+            }.joined(separator: "・")
+        tools.setToolTip("図形（\(shapeKeys)）　押し続けると、図形と、枠だけ／塗りつぶしを選べる", forSegment: Self.segment(for: .ellipse))
+        tools.setToolTip(hint("文字", .toolText), forSegment: Self.segment(for: .text))
+        tools.setToolTip(hint("移動", .toolMove), forSegment: Self.segment(for: .move))
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)
         clearButton.toolTip = hint("描いたものをすべて消す（背景画像は残る。取り消しで戻せる）", .clearCanvas)
@@ -272,7 +280,11 @@ final class Toolbar: NSObject {
         }
     }
 
-    @objc private func toolChanged(_ sender: NSSegmentedControl) { onSelectTool?(Tool(rawValue: sender.selectedSegment) ?? .pen) }
+    @objc private func toolChanged(_ sender: NSSegmentedControl) {
+        guard Self.segmentOrder.indices.contains(sender.selectedSegment) else { return }
+        let tool = Self.segmentOrder[sender.selectedSegment].first ?? .pen
+        onSelectTool?(ShapeMenuView.shapes.contains(tool) ? shapeTool : tool)   // 図形のボタンは、いま表す図形のツール
+    }
     @objc private func colorChanged(_ sender: NSColorWell) { onColor?(sender.color) }
     @objc private func sizeChanged(_ sender: NSSlider) { onBrushSize?(CGFloat(sender.doubleValue)) }
     @objc private func textSizeChanged(_ sender: NSPopUpButton) {
