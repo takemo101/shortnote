@@ -165,6 +165,7 @@ final class PaintWindowController: NSObject {
         case .toolRect: select(.rect)
         case .toolTriangle: select(.triangle)
         case .toolHand: select(.hand)
+        case .toolEraser: select(.eraser)
         case .viewReset: canvas.resetViewport()
         case .toolText: select(.text)
         case .toolMove: select(.move)
