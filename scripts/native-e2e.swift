@@ -1823,6 +1823,86 @@ do {
     _ = runCLI(["clear"])
 }
 
+// ---- 手書きの形の整形（A37）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let snapIds = [
+        "SN1 pen tool: a circle drawn with the real pointer and held still (button down, ~1 s) becomes an ellipse in get (centre and size match); releasing commits it; one Cmd+Z removes it",
+        "SN2 a rectangle held still becomes a rect; moving the pointer around its centre while the button is still down rotates it (get reports rotate near the pointer's angle change)",
+        "SN3 a zigzag held still stays a pen stroke (nothing recognised); a circle released without holding is a pen stroke",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func items() -> [[String: Any]] { agentGet()?.items ?? [] }
+    /// ボタンを押して、点をたどり、`holdSeconds` 止めたまま待つ。`then` の点があれば、押したままそこへ動かす。そして離す。
+    func stroke(_ pts: [CGPoint], holdSeconds: Double, then: [CGPoint] = []) -> Bool {
+        for p in [pts[0], pts[pts.count / 2], pts[pts.count - 1]] where hitOwner(p) != pid { print("   guard refused stroke at \(p)"); return false }
+        post(.mouseMoved, pts[0]); post(.leftMouseDown, pts[0])
+        for p in pts.dropFirst() { post(.leftMouseDragged, p) }
+        if holdSeconds > 0 { usleep(UInt32(holdSeconds * 1_000_000)) }
+        for p in then { post(.leftMouseDragged, p) }
+        post(.leftMouseUp, then.last ?? pts.last!); usleep(200_000)
+        return true
+    }
+    func circlePoints(_ cx: Double, _ cy: Double, _ r: Double) -> [CGPoint] {
+        (0...44).map { i in let t = Double(i) / 44 * 2 * .pi * 1.03; return pt(cx + r * cos(t), cy + r * sin(t)) }
+    }
+    if keyGuard(pid, app) != nil {
+        for id in snapIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == Seg.count, selectTool(Seg.pen) {
+        // SN1：円（中心 (240,160)、半径 60）を描いて、1 秒止める
+        let drewCircle = stroke(circlePoints(240, 160, 60), holdSeconds: 1.3)
+        let afterCircle = items()
+        key(6, .maskCommand)
+        let afterUndo = items()
+        if drewCircle {
+            let it = afterCircle.first
+            let ok = afterCircle.count == 1 && it?["op"] as? String == "ellipse"
+                && abs((numOf(it?["x"]) ?? -999) - 180) < 12 && abs((numOf(it?["y"]) ?? -999) - 100) < 12
+                && abs((numOf(it?["w"]) ?? -999) - 120) < 20 && abs((numOf(it?["h"]) ?? -999) - 120) < 20 && afterUndo.isEmpty
+            rec(snapIds[0], ok ? "pass" : "fail", "after holding a circle: ops=\(afterCircle.compactMap { $0["op"] as? String }) x=\(String(describing: numOf(it?["x"]))) y=\(String(describing: numOf(it?["y"]))) w=\(String(describing: numOf(it?["w"]))) h=\(String(describing: numOf(it?["h"]))) (expect one ellipse near 180,100 120x120); after Cmd+Z: \(afterUndo.count) items (expect 0)")
+        } else { rec(snapIds[0], "blocked", "drag guard refused") }
+
+        // SN2：四角（100,100〜300,220）を描いて、1 秒止める。止めた位置 (100,112)（中心 (200,160) の左上）から、押したまま (200,60)（真上）へ回す
+        var rectPts: [CGPoint] = []
+        let corners = [pt(100, 100), pt(300, 100), pt(300, 220), pt(100, 220), pt(100, 112)]
+        for i in 0..<(corners.count - 1) { for k in 0..<12 { let t = CGFloat(k) / 12; rectPts.append(CGPoint(x: corners[i].x + (corners[i + 1].x - corners[i].x) * t, y: corners[i].y + (corners[i + 1].y - corners[i].y) * t)) } }
+        rectPts.append(corners.last!)
+        let arc = (1...12).map { i -> CGPoint in
+            let a0 = atan2(112.0 - 160, 100.0 - 200), a1 = atan2(60.0 - 160, 200.0 - 200)   // 中心 (200,160) から見た向き
+            let a = a0 + (a1 - a0) * Double(i) / 12, r0 = hypot(100.0 - 200, 112.0 - 160), r1 = 100.0
+            let r = r0 + (r1 - r0) * Double(i) / 12
+            return pt(200 + r * cos(a), 160 + r * sin(a))
+        }
+        let drewRect = stroke(rectPts, holdSeconds: 1.3, then: arc)
+        let afterRect = items()
+        if drewRect {
+            let it = afterRect.first
+            let rotate = numOf(it?["rotate"]) ?? -999
+            let expected = (atan2(60.0 - 160, 200.0 - 200) - atan2(112.0 - 160, 100.0 - 200)) * 180 / .pi   // 約 +64°
+            let ok = afterRect.count == 1 && it?["op"] as? String == "rect" && abs(rotate - expected) < 8
+                && abs((numOf(it?["x"]) ?? -999) - 100) < 12 && abs((numOf(it?["w"]) ?? -999) - 200) < 20
+            rec(snapIds[1], ok ? "pass" : "fail", "after holding a rectangle and turning: ops=\(afterRect.compactMap { $0["op"] as? String }) rotate=\(rotate) (expect ≈ \(String(format: "%.0f", expected))°) x=\(String(describing: numOf(it?["x"]))) w=\(String(describing: numOf(it?["w"]))) (expect 100, 200)")
+        } else { rec(snapIds[1], "blocked", "drag guard refused") }
+
+        // SN3：ジグザグを、1 秒止める → ペンのまま。円を、止めずに離す → ペンのまま
+        _ = runCLI(["clear"])
+        let zig = [pt(60, 60), pt(100, 200), pt(140, 60), pt(180, 200), pt(220, 60), pt(260, 200)]
+        var zigPts: [CGPoint] = []
+        for i in 0..<(zig.count - 1) { for k in 0..<10 { let t = CGFloat(k) / 10; zigPts.append(CGPoint(x: zig[i].x + (zig[i + 1].x - zig[i].x) * t, y: zig[i].y + (zig[i + 1].y - zig[i].y) * t)) } }
+        let drewZig = stroke(zigPts, holdSeconds: 1.3)
+        let afterZig = items().compactMap { $0["op"] as? String }
+        let drewFast = stroke(circlePoints(360, 220, 50), holdSeconds: 0)
+        let afterFast = items().compactMap { $0["op"] as? String }
+        if drewZig, drewFast {
+            rec(snapIds[2], (afterZig == ["pen"] && afterFast == ["pen", "pen"]) ? "pass" : "fail", "ops after a held zigzag=\(afterZig) (expect [pen]); after also releasing a circle without holding=\(afterFast) (expect [pen, pen])")
+        } else { rec(snapIds[2], "blocked", "drag guard refused") }
+        _ = selectTool(Seg.pen)
+    } else { for id in snapIds { rec(id, "blocked", "tool select failed") } }
+    _ = runCLI(["clear"])
+}
+
 // ---- アイコン（A16）：バンドルの中身と、メニューバーの項目。メニューバーの画素は、他のプロセスのウィンドウなので撮らない（人間の確認）----
 let appBundlePath = URL(fileURLWithPath: buildExe).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().path
 let iconName = sh(["plutil", "-extract", "CFBundleIconFile", "raw", infoPlistPath]).1.trimmingCharacters(in: .whitespacesAndNewlines)
