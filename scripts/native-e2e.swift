@@ -1708,6 +1708,7 @@ do {
     let viewIds = [
         "VW1 hand tool: a real-pointer drag moves the view only (get and the exported PNG are unchanged); a line drawn afterwards lands where the pointer was, in canvas coordinates",
         "VW2 Cmd+scroll over the canvas zooms in around the pointer (the point under the pointer stays; a 100 px drag draws a shorter line in canvas pt; the export stays 960x640); Cmd+0 returns to the normal view",
+        "VW3 the view bar (zoom percentage and reset button) is absent in the normal view, appears after Cmd+scroll zoom with a percentage above 100%, the percentage button returns to 100%, and the reset button hides the bar again",
     ]
     _ = runCLI(["clear"])
     if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
@@ -1771,6 +1772,27 @@ do {
                     "after Cmd+scroll: a 100 px drag from the pointer is a canvas line from (\(l2.0.0),\(l2.0.1)) (expect 200,160) of length \(String(format: "%.1f", length)) pt (expect < 90); export \(exportRep.rep.pixelsWide)x\(exportRep.rep.pixelsHigh) (expect 960x640); after Cmd+0 a 100 px drag at (100,280) is canvas x \(l3.map { "\($0.0.0)-\($0.1.0)" } ?? "none") (expect 100-200)")
             } else { rec(viewIds[1], "blocked", "drag guard refused or export failed (drew=\(zoomedDrew))") }
         } else { rec(viewIds[1], "blocked", "the pointer position is not over the candidate") }
+
+        // VW3：ビューの帯（SPEC §3.2.5）。等倍・移動なし（Cmd+0 のあと）では出ない。Cmd+スクロールで拡大すると出て、倍率を押すと 100%、戻すボタンで、また隠れる
+        func zoomBar() -> AXUIElement? { collect(app) { axs($0, "AXIdentifier") == "zoomPercent" }.first }
+        func resetBar() -> AXUIElement? { collect(app) { axs($0, "AXIdentifier") == "viewReset" }.first }
+        key(29, .maskCommand); usleep(500_000)
+        let barHiddenAtStart = zoomBar() == nil
+        if hitOwner(anchor) == pid {
+            post(.mouseMoved, anchor)
+            for _ in 0..<6 { scrollWheel(at: anchor, dy: 30, flags: .maskCommand) }
+            usleep(600_000)
+            let zoomedTitle = zoomBar().flatMap { axs($0, "AXTitle") }
+            if let z = zoomBar() { _ = AXUIElementPerformAction(z, kAXPressAction as CFString) }
+            usleep(500_000)
+            let titleAfterZoomReset = zoomBar().flatMap { axs($0, "AXTitle") }
+            if let r = resetBar() { _ = AXUIElementPerformAction(r, kAXPressAction as CFString) }
+            usleep(500_000)
+            let barHiddenAtEnd = zoomBar() == nil
+            let zoomedPercent = Int((zoomedTitle ?? "").dropLast()) ?? 0
+            rec(viewIds[2], (barHiddenAtStart && zoomedPercent > 100 && titleAfterZoomReset == "100%" && barHiddenAtEnd) ? "pass" : "fail",
+                "bar hidden in the normal view=\(barHiddenAtStart); after Cmd+scroll the percentage reads \(zoomedTitle ?? "none") (expect > 100%); after pressing it: \(titleAfterZoomReset ?? "none") (expect 100%); after pressing the reset button the bar is hidden=\(barHiddenAtEnd)")
+        } else { rec(viewIds[2], "blocked", "the pointer position is not over the candidate") }
         _ = selectTool(Seg.pen)
     } else { for id in viewIds { rec(id, "blocked", "tool select failed") } }
     key(29, .maskCommand)
@@ -1831,6 +1853,7 @@ do {
         "SN1 pen tool: a circle drawn with the real pointer and held still (button down, ~1 s) becomes an ellipse in get (centre and size match); releasing commits it; one Cmd+Z removes it",
         "SN2 a rectangle held still becomes a rect; moving the pointer around its centre while the button is still down rotates it (get reports rotate near the pointer's angle change)",
         "SN3 a zigzag held still stays a pen stroke (nothing recognised); a circle released without holding is a pen stroke",
+        "SN4 while the button is still down after a circle snaps, moving the pointer away from its centre to twice the distance scales the ellipse to about twice the size (rotation and scale together)",
     ]
     _ = runCLI(["clear"])
     if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
@@ -1882,9 +1905,23 @@ do {
             let rotate = numOf(it?["rotate"]) ?? -999
             let expected = (atan2(60.0 - 160, 200.0 - 200) - atan2(112.0 - 160, 100.0 - 200)) * 180 / .pi   // 約 +64°
             let ok = afterRect.count == 1 && it?["op"] as? String == "rect" && abs(rotate - expected) < 8
-                && abs((numOf(it?["x"]) ?? -999) - 100) < 12 && abs((numOf(it?["w"]) ?? -999) - 200) < 20
-            rec(snapIds[1], ok ? "pass" : "fail", "after holding a rectangle and turning: ops=\(afterRect.compactMap { $0["op"] as? String }) rotate=\(rotate) (expect ≈ \(String(format: "%.0f", expected))°) x=\(String(describing: numOf(it?["x"]))) w=\(String(describing: numOf(it?["w"]))) (expect 100, 200)")
+                && abs((numOf(it?["x"]) ?? -999) - 110) < 12 && abs((numOf(it?["w"]) ?? -999) - 180) < 20      // 回しながら、中心からの距離が、111 → 100 になる：約 0.9 倍
+            rec(snapIds[1], ok ? "pass" : "fail", "after holding a rectangle and turning: ops=\(afterRect.compactMap { $0["op"] as? String }) rotate=\(rotate) (expect ≈ \(String(format: "%.0f", expected))°) x=\(String(describing: numOf(it?["x"]))) w=\(String(describing: numOf(it?["w"]))) (expect 110, 180: the distance from the centre goes 111 → 100)")
         } else { rec(snapIds[1], "blocked", "drag guard refused") }
+
+        // SN4：円を描いて止め、押したまま、中心から遠ざかる向きへ、距離が 2 倍になるまで動かす → 楕円が、約 2 倍（240×240）になる
+        _ = runCLI(["clear"])
+        let tEnd = 2 * Double.pi * 1.03
+        let vx = 60 * cos(tEnd), vy = 60 * sin(tEnd)
+        let grow = (1...10).map { i -> CGPoint in let f = 1 + Double(i) / 10; return pt(240 + vx * f, 160 + vy * f) }
+        let drew4 = stroke(circlePoints(240, 160, 60), holdSeconds: 1.3, then: grow)
+        let after4 = items()
+        if drew4 {
+            let it = after4.first
+            let w = numOf(it?["w"]) ?? -999, x = numOf(it?["x"]) ?? -999
+            let ok = after4.count == 1 && it?["op"] as? String == "ellipse" && abs(w - 240) < 30 && abs(x + w / 2 - 240) < 14
+            rec(snapIds[3], ok ? "pass" : "fail", "after holding a circle and pulling the pointer out to twice the distance: ops=\(after4.compactMap { $0["op"] as? String }) w=\(w) (expect ≈ 240) centre x=\(x + w / 2) (expect ≈ 240)")
+        } else { rec(snapIds[3], "blocked", "drag guard refused") }
 
         // SN3：ジグザグを、1 秒止める → ペンのまま。円を、止めずに離す → ペンのまま
         _ = runCLI(["clear"])

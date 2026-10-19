@@ -49,6 +49,15 @@ struct Viewport: Equatable {
         return next.clamped(viewSize: viewSize)
     }
 
+    /// 倍率を、ちょうど 1（100%）にしたもので、見えている範囲の中心が、`center`（キャンバスの座標）になるもの。
+    /// （`zoomed(by: 1 / zoom)` では、浮動小数点の誤差で、ちょうど 1 にならない倍率がある）
+    func resetZoom(centeredOn center: CGPoint, viewSize: CGSize) -> Viewport {
+        var next = self
+        next.zoom = 1
+        next.origin = CGPoint(x: center.x - viewSize.width / 2, y: center.y - viewSize.height / 2)
+        return next.clamped(viewSize: viewSize)
+    }
+
     /// 画面で `delta`（右・下が正）だけ、内容が動くように、ビューを動かしたもの（見えている範囲は、逆向きに動く）。
     func panned(byScreen delta: CGSize, viewSize: CGSize) -> Viewport {
         var next = self

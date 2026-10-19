@@ -86,16 +86,16 @@ struct ShapeSnapCanvasTests {
         #expect(abs(ItemHandles.normalized(c.document.items[0].rotation - expected)) < 0.12, "rotation=\(c.document.items[0].rotation * 180 / .pi)° expected≈\(expected * 180 / .pi)°")
         #expect(abs(rect.midX - 200) < 8 && abs(rect.midY - 160) < 8)           // 中心は、動かない
 
-        // 直線：始点を軸に、終点が回る（長さは、変わらない）
+        // 直線：始点を軸に、終点が回り、長さは、ポインタの距離の比（240 → 180）で変わる
         let d = canvas()
         d.mouseDown(with: try mouse(.leftMouseDown, d, CGPoint(x: 60, y: 200)))
         for i in 1...30 { d.mouseDragged(with: try mouse(.leftMouseDragged, d, CGPoint(x: 60 + CGFloat(i) * 8, y: 200))) }
         d.snapHeldStroke()
-        d.mouseDragged(with: try mouse(.leftMouseDragged, d, CGPoint(x: 60, y: 60)))   // 始点の真上へ（終点 (300,200) の向き：右 → 上へ、-90°）
-        d.mouseUp(with: try mouse(.leftMouseUp, d, CGPoint(x: 60, y: 60)))
+        d.mouseDragged(with: try mouse(.leftMouseDragged, d, CGPoint(x: 60, y: 20)))   // 始点の真上へ（終点 (300,200) の向き：右 → 上へ、-90°）。距離 180
+        d.mouseUp(with: try mouse(.leftMouseUp, d, CGPoint(x: 60, y: 20)))
         guard case .line(let from, let to) = d.document.items[0].content else { Issue.record("直線でない：\(d.document.items[0].content)"); return }
         #expect(abs(from.x - 60) < 1.5 && abs(from.y - 200) < 1.5)
-        #expect(abs(to.x - 60) < 6 && abs(hypot(to.x - from.x, to.y - from.y) - 240) < 6 && to.y < from.y)   // 真上へ、長さは同じ
+        #expect(abs(to.x - 60) < 6 && abs(hypot(to.x - from.x, to.y - from.y) - 180) < 6 && to.y < from.y)   // 真上へ、長さは 180
     }
 
     @Test("矢印：整形すると、終点に矢じりのある直線になる")
