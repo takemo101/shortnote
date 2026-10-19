@@ -194,6 +194,15 @@ struct Document {
         return copy
     }
 
+    /// `indices`（範囲外の番号は除く）の要素を消した文書。消すものが無ければ `nil`（履歴に積む変更が無い）。背景の画像は、消さない（SPEC §3.2.6）。
+    func removingItems(at indices: Set<Int>) -> Document? {
+        let valid = indices.filter { items.indices.contains($0) }
+        guard !valid.isEmpty else { return nil }
+        var copy = self
+        copy.items = items.enumerated().filter { !valid.contains($0.offset) }.map(\.element)
+        return copy
+    }
+
     /// `point` を囲む範囲を持つ、いちばん手前の要素の番号。無ければ `nil`。
     /// 円・四角・ペンの輪も、内側をクリックして掴める（囲む範囲で判定する）。
     func topItemIndex(at point: CGPoint, slop: CGFloat = Document.grabSlop) -> Int? {

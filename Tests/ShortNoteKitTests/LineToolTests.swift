@@ -69,9 +69,9 @@ struct LineToolTests {
         #expect(Command.toolLine.group == .tool && Command.toolTriangle.group == .tool)
     }
 
-    @Test("ツールバーの並びは、ペン／直線／図形（円・四角・三角）／文字／移動／ハンド。直線はペンの隣（2 番目）")
+    @Test("ツールバーの並びは、ペン／直線／図形（円・四角・三角）／文字／消しゴム／移動／ハンド。直線はペンの隣（2 番目）")
     func toolSegmentOrder() {
-        #expect(Tool.allCases == [.pen, .line, .ellipse, .rect, .triangle, .text, .move, .hand])
-        #expect([Tool.pen, .line, .ellipse, .rect, .triangle, .text, .move, .hand].map(Toolbar.segment(for:)) == [0, 1, 2, 2, 2, 3, 4, 5])
+        #expect(Tool.allCases == [.pen, .line, .ellipse, .rect, .triangle, .text, .move, .hand, .eraser])
+        #expect([Tool.pen, .line, .ellipse, .rect, .triangle, .text, .eraser, .move, .hand].map(Toolbar.segment(for:)) == [0, 1, 2, 2, 2, 3, 4, 5, 6])
     }
 }

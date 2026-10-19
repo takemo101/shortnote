@@ -2,7 +2,7 @@ import AppKit
 
 /// 描画ツール。ツールバーのボタンの並び（ペン／直線／図形／文字／移動／ハンド）とは別で、円・四角・三角は、「図形」のボタン 1 つにまとまる（`Toolbar`）。
 enum Tool: CaseIterable {
-    case pen, line, ellipse, rect, triangle, text, move, hand
+    case pen, line, ellipse, rect, triangle, text, move, hand, eraser
 }
 
 /// キャンバス。ポインタ入力を、`Document` の変更（履歴つき）につなぐ。描画は `CanvasRenderer`、文字入力は `InlineTextEditor` が行う。
@@ -17,6 +17,7 @@ final class CanvasView: NSView {
             selectedItem = nil
             marquee = nil   // 範囲選択の途中で、ツールを替えたら、捨てる
             panStart = nil  // ハンドのドラッグの途中で、ツールを替えたら、止める
+            eraserMarks = []; eraserLast = nil   // 消しゴムの途中で、ツールを替えたら、何も消さない
             window?.invalidateCursorRects(for: self)
         }
     }
@@ -56,6 +57,14 @@ final class CanvasView: NSView {
     }
     /// ハンドツールのドラッグの、始めのビューの位置と、ポインタ（ウィンドウの座標）。
     private var panStart: (origin: CGPoint, pointer: CGPoint)?
+    /// 消しゴムの、印が付いた要素の番号（離すと、まとめて消える）。SPEC §3.2.6。
+    private var eraserMarks: Set<Int> = [] {
+        didSet { if oldValue != eraserMarks { needsDisplay = true } }
+    }
+    /// 消しゴムで、動かしている間の、前のポインタの位置（キャンバスの座標）。押していないときは `nil`。
+    private var eraserLast: CGPoint?
+    /// 消しゴムの、ポインタの半径（画面の pt。拡大縮小していても、同じ）。
+    static let eraserRadius: CGFloat = 8
     /// 移動ツールで、動かしている要素の番号と、動かし始める前の文書。
     private var move: (index: Int, base: Document)?
     /// 移動ツールで選ばれている要素の番号（小さい順。背景画像以外の、どの要素も選べる。範囲選択で複数になる）。保存しない。SPEC §3.2.3。
@@ -118,6 +127,7 @@ final class CanvasView: NSView {
         switch tool {
         case .text: addCursorRect(bounds, cursor: .iBeam)
         case .hand: addCursorRect(bounds, cursor: panStart == nil ? .openHand : .closedHand)
+        case .eraser: addCursorRect(bounds, cursor: Self.eraserCursor)
         case .move: addCursorRect(bounds, cursor: .arrow)
         default: addCursorRect(bounds, cursor: .crosshair)
         }
@@ -224,6 +234,8 @@ final class CanvasView: NSView {
         moveGroup = nil
         marquee = nil
         resizing = nil
+        eraserMarks = []
+        eraserLast = nil
     }
 
     // MARK: - エージェントの操作（SPEC §3.7）
@@ -235,7 +247,7 @@ final class CanvasView: NSView {
     var committedDocument: Document { move?.base ?? document }
 
     /// 人が、文字の入力か、ドラッグ（描く・動かす）の途中か。
-    var isInteracting: Bool { editor.isActive || draft != nil || move != nil || marquee != nil }
+    var isInteracting: Bool { editor.isActive || draft != nil || move != nil || marquee != nil || eraserLast != nil }
 
     /// 要素を、手前に足す。取り消しの 1 段（確定した順）。ドラッグ中の線・図形と、入力中の文字は続き、確定したとき、これらの上に重なる。
     /// 移動のドラッグ中は、動かす前の文書（`move.base`）にも足す。足さないと、次のドラッグ操作で `document` が作り直されたとき、消える。
@@ -261,6 +273,8 @@ final class CanvasView: NSView {
         move = nil
         moveGroup = nil
         resizing = nil
+        eraserMarks = []
+        eraserLast = nil
         selectedItem = nil
         history.record(previous: base)
         document = cleared
@@ -344,6 +358,7 @@ final class CanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         commitEditing()
         marquee = nil       // 前の範囲選択が、離す操作を受けずに残っていたら、捨てる（次のドラッグを、乗っ取らないように）
+        eraserMarks = []; eraserLast = nil   // 消しゴムも、同じ（離す操作が届かなかったとき、印のついた要素を、次のドラッグで、消さないように）
         panStart = nil      // ハンドのドラッグも、同じ（離す操作が届かなかったとき、次のドラッグが、すべてパンにならないように）
         let p = location(event)
         dragStart = p
@@ -360,6 +375,9 @@ final class CanvasView: NSView {
             draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize, arrow: lineArrow)
         case .text:
             beginText(at: p)
+        case .eraser:
+            eraserLast = p
+            markErased(from: p, to: p)
         case .hand:
             panStart = (viewport.origin, event.locationInWindow)
             NSCursor.closedHand.set()
@@ -395,6 +413,11 @@ final class CanvasView: NSView {
             return
         }
         let p = location(event)
+        if let last = eraserLast {
+            markErased(from: last, to: p)
+            eraserLast = p
+            return
+        }
         if marquee != nil {
             marquee?.current = p
             needsDisplay = true
@@ -469,6 +492,10 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if eraserLast != nil {
+            finishErasing()
+            return
+        }
         if panStart != nil {
             panStart = nil
             window?.invalidateCursorRects(for: self)
@@ -507,6 +534,43 @@ final class CanvasView: NSView {
             break
         }
         commit(document.appending(item))
+    }
+
+    // MARK: - 消しゴム（SPEC §3.2.6）
+
+    /// 消しゴムのカーソル：小さな輪（白い縁つきの黒い輪。どの背景でも見える）。
+    static let eraserCursor: NSCursor = {
+        let size = NSSize(width: 20, height: 20)
+        let image = NSImage(size: size, flipped: false) { rect in
+            let ring = rect.insetBy(dx: 3, dy: 3)
+            NSColor.white.setStroke()
+            let outer = NSBezierPath(ovalIn: ring); outer.lineWidth = 3.5; outer.stroke()
+            NSColor.black.setStroke()
+            let inner = NSBezierPath(ovalIn: ring); inner.lineWidth = 1.5; inner.stroke()
+            return true
+        }
+        return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+    }()
+
+    /// ポインタの動き（`a` から `b`）が触れた要素に、印を付ける（まだ消さない）。背景の画像は、要素ではないので、対象にならない。
+    private func markErased(from a: CGPoint, to b: CGPoint) {
+        let radius = Self.eraserRadius * viewport.scale
+        var marks = eraserMarks
+        for (index, item) in document.items.enumerated() where !marks.contains(index) && item.isTouched(from: a, to: b, radius: radius) {
+            marks.insert(index)
+        }
+        eraserMarks = marks
+    }
+
+    /// 離したとき：印の付いた要素を、まとめて消す（取り消しの 1 段）。何にも触れなかったときは、何もしない。
+    private func finishErasing() {
+        let marks = eraserMarks
+        eraserMarks = []
+        eraserLast = nil
+        needsDisplay = true
+        guard let erased = document.removingItems(at: marks) else { return }
+        selectedItems = []
+        commit(erased)
     }
 
     private func dragRect(to p: CGPoint) -> CGRect {
@@ -570,7 +634,7 @@ final class CanvasView: NSView {
         CanvasRenderer.drawBackdrop(transparent: transparent, bounds: canvasRect, in: ctx)
         ctx.saveGState()
         ctx.clip(to: canvasRect)   // 書き出しと同じく、キャンバスの外へはみ出した分は、出さない
-        CanvasRenderer.drawContent(document, draft: draft, in: ctx)
+        CanvasRenderer.drawContent(document, draft: draft, faded: eraserMarks, in: ctx)
         ctx.restoreGState()
         ctx.setStrokeColor(NSColor.separatorColor.cgColor)
         ctx.setLineWidth(s)

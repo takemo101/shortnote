@@ -133,7 +133,7 @@ struct FillUITests {
     @Test("ツールバー：図形のボタンに、2 列 × 3 行のメニュー（左が枠だけ、右が塗りつぶし。上から 四角・円・三角）。マスを選ぶと、通知・印・ツールの切り替えが起きる。選びは図形ごとに別々")
     func shapeMenu() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
+        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 7 })
         #expect(control.menu(forSegment: Toolbar.segment(for: .pen)) == nil)
         let shapeSegment = Toolbar.segment(for: .ellipse)
         let menu = try #require(control.menu(forSegment: shapeSegment))

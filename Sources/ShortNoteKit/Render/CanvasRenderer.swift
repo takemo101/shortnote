@@ -6,12 +6,23 @@ import AppKit
 enum CanvasRenderer {
     // MARK: - 画面と書き出しに共通
 
-    /// 背景画像 → 確定済みの要素 → 描画中の要素の順に描く。
-    static func drawContent(_ document: Document, draft: Item?, in ctx: CGContext) {
+    /// 背景画像 → 確定済みの要素 → 描画中の要素の順に描く。`faded`（要素の番号）は、薄く描く（消しゴムの、消える印。画面だけ。SPEC §3.2.6）。
+    static func drawContent(_ document: Document, draft: Item?, faded: Set<Int> = [], in ctx: CGContext) {
         if let background = document.background {
             drawImage(background, in: document.backgroundRect, ctx)
         }
-        for item in document.items { draw(item, in: ctx) }
+        for (index, item) in document.items.enumerated() {
+            if faded.contains(index) {
+                ctx.saveGState()
+                ctx.setAlpha(0.25)
+                ctx.beginTransparencyLayer(in: item.bounds.insetBy(dx: -2, dy: -2), auxiliaryInfo: nil)   // 色の透明度・塗りの重なりを含めて、1 枚として薄くする。範囲は、要素の外接する範囲まで（キャンバス全体の大きさにすると、印の数だけ、大きなバッファを取り、遅い）
+                draw(item, in: ctx)
+                ctx.endTransparencyLayer()
+                ctx.restoreGState()
+            } else {
+                draw(item, in: ctx)
+            }
+        }
         if let draft { draw(draft, in: ctx) }
     }
 

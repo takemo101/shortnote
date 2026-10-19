@@ -169,7 +169,7 @@ struct ShapeMenuBehaviourTests {
     @Test("どのマスを選んでも、図形のボタンの幅・ツールバーの上段の幅は変わらない（絵の大きさが、円・四角・三角でまちまちでも）")
     func widthIsConstant() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
+        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 7 })
         let grid = try #require(control.menu(forSegment: Toolbar.segment(for: .ellipse))?.items.first?.view as? ShapeMenuView)
         let cells = allSubviews(grid).compactMap { $0 as? NSButton }
         #expect(cells.count == 6)
