@@ -183,6 +183,7 @@ struct ShapeMenuBehaviourTests {
 
     @Test("ボタンを押したままメニューを開き、マスの上で離したとき（mouseUp だけが届く）も、そのマスが選ばれる。普通に押して離す（mouseDown の追跡の中）では、二重に選ばない")
     func releaseOnACellSelectsIt() throws {
+        _ = NSApplication.shared   // `sendAction` は、アプリのオブジェクトを通す。ほかのテストが先に作っていないと（CI の順序では）、何も送られない
         let grid = ShapeMenuView()
         var chosen: [String] = []
         grid.onChoose = { chosen.append("\(ShapeMenuView.title(for: $0))\($1 ? "・塗り" : "")") }
