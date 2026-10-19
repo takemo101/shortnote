@@ -55,8 +55,10 @@ final class CanvasView: NSView {
     /// 反映は、`NSView.bounds`（見えている範囲）で行う：`convert` が、ポインタの位置を、そのままキャンバスの座標にし、描画・カーソル・入力欄も、同じ座標系になる。
     /// キャンバス（書き出す範囲）は、`canvasRect`（`bounds` ではない）。
     private(set) var viewport = Viewport.identity {
-        didSet { if oldValue != viewport { applyViewport() } }
+        didSet { if oldValue != viewport { applyViewport(); onViewportChange?(viewport) } }
     }
+    /// ビューが変わった（拡大縮小・移動・戻した。ウィンドウの大きさに合わせて収め直したときも）とき、新しいビューを渡す（倍率の帯の表示のため。SPEC §3.2.5）。
+    var onViewportChange: ((Viewport) -> Void)?
     /// ハンドツールのドラッグの、始めのビューの位置と、ポインタ（ウィンドウの座標）。
     private var panStart: (origin: CGPoint, pointer: CGPoint)?
     /// 消しゴムの、印が付いた要素の番号（離すと、まとめて消える）。SPEC §3.2.6。
@@ -70,7 +72,25 @@ final class CanvasView: NSView {
     /// 手書きの形の整形（SPEC §3.2.7）：止まりの待ちのタイマーと、その基準の位置。整形したあとは、元の図形と、掴んだ位置の向き（回すときの基準）。
     private var holdTimer: Timer?
     private var holdAnchor: CGPoint?
-    private var snapBase: (shape: RecognizedShape, startAngle: CGFloat)?
+    /// 整形した図形（元）、掴んだ位置の向きと、軸からの距離（回転・拡大縮小の基準）。
+    private var snapBase: (shape: RecognizedShape, startAngle: CGFloat, startDistance: CGFloat)?
+    /// 待ち時間の印（SPEC §3.2.7）：ポインタのまわりの輪。`center` は、キャンバスの外へ丸めない実際の位置。
+    struct HoldMark: Equatable {
+        var center: CGPoint
+        var since: Date
+        var snapped: Bool
+    }
+    private(set) var holdMark: HoldMark?
+    private var holdTick: Timer?
+    /// 輪を出し始めるまでの時間（秒）と、輪の半径（画面の pt）。
+    static let holdMarkDelay: TimeInterval = 0.12
+    static let holdMarkRadius: CGFloat = 16
+
+    /// 止めてからの経過時間 `elapsed` で、輪の円弧が、どこまで伸びているか（0〜1）。輪が出る前（`holdMarkDelay` まで）は `nil`。
+    static func holdMarkProgress(elapsed: TimeInterval) -> CGFloat? {
+        guard elapsed >= holdMarkDelay else { return nil }
+        return CGFloat(min((elapsed - holdMarkDelay) / (holdDelay - holdMarkDelay), 1))
+    }
     /// 待ちの基準にした点が、描いている線の、何番目か（止めている間に付いた、手の震えの点を、判定から外すため）。
     private var holdAnchorIndex = 0
     /// ポインタを止めたとみなす待ち時間（秒）と、動いていないとみなす距離（画面の pt）。
@@ -160,6 +180,14 @@ final class CanvasView: NSView {
 
     /// ビューを、等倍・動かしていない状態に戻す。
     func resetViewport() { viewport = .identity }
+
+    /// 倍率だけを、100% に戻す。いま見えているキャンバスの範囲の中心が、画面の中央に来る
+    /// （縮小したまま、キャンバスの外が中心になっていても、等倍にしたとき、キャンバスが、画面の隅に、わずかしか残らないことはない）。
+    func resetZoom() {
+        let visible = viewport.visibleRect(viewSize: frame.size).intersection(canvasRect)
+        guard !visible.isNull else { viewport = .identity; return }
+        viewport = viewport.resetZoom(centeredOn: CGPoint(x: visible.midX, y: visible.midY), viewSize: frame.size)
+    }
 
     /// 倍率を `factor` 倍にする。`anchor`（キャンバスの座標）の点は、画面の同じ位置に残る。
     func zoomViewport(by factor: CGFloat, at anchor: CGPoint) {
@@ -487,13 +515,19 @@ final class CanvasView: NSView {
             return
         }
         if let snap = snapBase, let current = draft {
-            // 整形したあと：ポインタの向きの変化の分だけ、図形を回す（掴んだ位置からの差）。掴める範囲が、キャンバスの中にほとんど残らなくなる向きへは、回さない（移動ツールの回転と同じ規則。直前の向きのまま）
-            let delta = ItemHandles.normalized(ItemHandles.angle(from: snap.shape.pivot, to: p) - snap.startAngle)
-            let turned = snap.shape.rotated(by: delta).item(color: current.color, size: current.size)
+            // 整形したあと：軸から見たポインタの、向きの変化の分だけ回り、距離の比の分だけ拡大縮小する（掴んだ位置からの差）。
+            // 掴める範囲が、キャンバスの中にほとんど残らなくなる向きへは、動かさない（移動ツールの回転と同じ規則。直前のまま）
+            holdMark?.center = convert(event.locationInWindow, from: nil)
+            needsDisplay = true
+            let pivot = snap.shape.pivot
+            let distance = hypot(p.x - pivot.x, p.y - pivot.y)
+            guard distance >= 1 else { return }   // 軸の真上：向きが決まらない
+            let delta = ItemHandles.normalized(ItemHandles.angle(from: pivot, to: p) - snap.startAngle)
+            let scale = snap.startDistance >= 4 ? distance / snap.startDistance : 1   // 軸の近くで止めたときは、拡大縮小しない（距離の比が、暴れるため）
+            let turned = snap.shape.transformed(by: delta, scale: scale).item(color: current.color, size: current.size)
             let before = document.appending(current), after = document.appending(turned)
             guard after.keepsGrabArea(at: after.items.count - 1, since: before, in: canvasRect) else { return }
             draft = turned
-            needsDisplay = true
             return
         }
         guard let item = draft else { return }
@@ -566,15 +600,22 @@ final class CanvasView: NSView {
 
     // MARK: - 手書きの形の整形（SPEC §3.2.7）
 
-    /// ペンで、動かさずに待つ：その位置を基準に、待ち直す。
+    /// ペンで、動かさずに待つ：その位置を基準に、待ち直す。待ち時間の印も、その位置から、出し直す。
     private func scheduleHold(at p: CGPoint) {
         holdTimer?.invalidate()
         holdAnchor = p
         if case .pen(let points)? = draft?.content { holdAnchorIndex = max(points.count - 1, 0) }
-        guard tool == .pen, snapBase == nil else { holdTimer = nil; return }
+        guard tool == .pen, snapBase == nil else { holdTimer = nil; clearHoldMark(); return }
         let timer = Timer(timeInterval: Self.holdDelay, repeats: false) { [weak self] _ in self?.snapHeldStroke() }
         RunLoop.main.add(timer, forMode: .common)
         holdTimer = timer
+        invalidateHoldMark()                      // 前の位置の輪を消す
+        holdMark = HoldMark(center: p, since: Date(), snapped: false)
+        if holdTick == nil {                      // 輪の円弧を伸ばすための、描き直し
+            let tick = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in self?.invalidateHoldMark() }
+            RunLoop.main.add(tick, forMode: .common)
+            holdTick = tick
+        }
     }
 
     private func stopHold() {
@@ -582,17 +623,35 @@ final class CanvasView: NSView {
         holdTimer = nil
         holdAnchor = nil
         snapBase = nil
+        clearHoldMark()
     }
 
-    /// 止めたまま、待ち時間がたった：いま描いている線を、円・四角・三角・直線・矢印に見えれば、その図形に置き替える（見えなければ、何もしない）。
-    /// 置き替えたあと、ボタンを押したまま動かすと、図形が回る。
+    private func clearHoldMark() {
+        holdTick?.invalidate()
+        holdTick = nil
+        if holdMark != nil { invalidateHoldMark(); holdMark = nil }
+    }
+
+    /// 輪のまわりだけを、描き直す。
+    private func invalidateHoldMark() {
+        guard let mark = holdMark else { return }
+        let r = (Self.holdMarkRadius + 6) * viewport.scale
+        setNeedsDisplay(NSRect(x: mark.center.x - r, y: mark.center.y - r, width: 2 * r, height: 2 * r))
+    }
+
+    /// 止めたまま、待ち時間がたった：いま描いている線を、円・四角・三角・直線・矢印に見えれば、その図形に置き替える（見えなければ、何もしない。輪は消える）。
+    /// 置き替えたあと、ボタンを押したまま動かすと、図形が回り、拡大縮小する。
     func snapHeldStroke() {
         holdTimer = nil
         // 止めている間に付いた、手の震えの点（基準の点より後）は、形の判定から外す（線が、伸びて、直線に見えなくなるため）
         guard tool == .pen, snapBase == nil, let current = draft, case .pen(let points) = current.content, points.count >= 4, let last = points.last?.point,
-              let shape = ShapeRecognizer.recognize(points.prefix(holdAnchorIndex + 1).map(\.point)) else { return }
+              let shape = ShapeRecognizer.recognize(points.prefix(holdAnchorIndex + 1).map(\.point)) else { clearHoldMark(); return }
         draft = shape.item(color: current.color, size: current.size)
-        snapBase = (shape, ItemHandles.angle(from: shape.pivot, to: last))
+        let pivot = shape.pivot
+        snapBase = (shape, ItemHandles.angle(from: pivot, to: last), hypot(last.x - pivot.x, last.y - pivot.y))
+        holdTick?.invalidate()
+        holdTick = nil
+        holdMark?.snapped = true                  // 輪は、閉じて、ポインタについてくる
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)   // 触覚（トラックパッドがあれば）
         needsDisplay = true
     }
@@ -702,6 +761,31 @@ final class CanvasView: NSView {
         ctx.stroke(canvasRect.insetBy(dx: 0.5 * s, dy: 0.5 * s))
         drawSelectionHandles(in: ctx)
         drawMultiSelection(in: ctx)
+        drawHoldMark(in: ctx)
+    }
+
+    /// 待ち時間の印（SPEC §3.2.7）：ポインタのまわりの輪。暗い縁の上に、明るい円弧（真上から時計回りに、整形までの時間で 1 周）。整形したら、閉じた輪（アクセントの色）。
+    /// 画面だけの表示で、書き出し（`renderPNG`）には入らない。大きさは、拡大縮小しても、画面で同じ。
+    private func drawHoldMark(in ctx: CGContext) {
+        guard tool == .pen, let mark = holdMark else { return }
+        let progress: CGFloat
+        if mark.snapped { progress = 1 } else if let p = Self.holdMarkProgress(elapsed: Date().timeIntervalSince(mark.since)) { progress = p } else { return }
+        let s = viewport.scale, radius = Self.holdMarkRadius * s
+        ctx.saveGState()
+        defer { ctx.restoreGState() }
+        ctx.setLineCap(.round)
+        ctx.setStrokeColor(NSColor.black.withAlphaComponent(0.45).cgColor)
+        ctx.setLineWidth(5.5 * s)
+        ctx.strokeEllipse(in: CGRect(x: mark.center.x - radius, y: mark.center.y - radius, width: 2 * radius, height: 2 * radius))
+        ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
+        ctx.setLineWidth(2.5 * s)
+        let steps = max(Int((progress * 60).rounded(.up)), 1)
+        for i in 0...steps {   // 折れ線で、円弧を描く（反転したビューでの、向きの取り違えを避ける）
+            let a = -CGFloat.pi / 2 + 2 * .pi * progress * CGFloat(i) / CGFloat(steps)
+            let point = CGPoint(x: mark.center.x + radius * cos(a), y: mark.center.y + radius * sin(a))
+            if i == 0 { ctx.move(to: point) } else { ctx.addLine(to: point) }
+        }
+        ctx.strokePath()
     }
 
     /// 選ばれた要素の取っ手。点線の枠（画像・円・四角・文字は、回した向きのまま。ペンは外接する範囲）、大きさの取っ手（四隅、直線は両端）、

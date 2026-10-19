@@ -20,14 +20,39 @@ extension RecognizedShape {
         }
     }
 
-    /// 軸のまわりに、`angle`（時計回りが正）だけ回した図形。直線・矢印は、終点が回る（長さは、変わらない）。
-    func rotated(by angle: CGFloat) -> RecognizedShape {
+    /// 拡大縮小の、いちばん小さい短い辺（直線・矢印は長さ。pt）と、いちばん大きい倍率。
+    static let minimumSide: CGFloat = 8
+    static let maximumScale: CGFloat = 10
+
+    /// この図形を、`minimumSide` まで小さくし、`maximumScale` 倍まで大きくできる、倍率の範囲。
+    var scaleLimits: ClosedRange<CGFloat> {
+        let side: CGFloat
         switch self {
-        case .line(let from, let to): return .line(from: from, to: ItemHandles.rotate(to, about: from, by: angle))
-        case .arrow(let from, let to): return .arrow(from: from, to: ItemHandles.rotate(to, about: from, by: angle))
-        case .ellipse(let rect, let rotation): return .ellipse(rect: rect, rotation: ItemHandles.normalized(rotation + angle))
-        case .rect(let rect, let rotation): return .rect(rect: rect, rotation: ItemHandles.normalized(rotation + angle))
-        case .triangle(let rect, let rotation): return .triangle(rect: rect, rotation: ItemHandles.normalized(rotation + angle))
+        case .line(let from, let to), .arrow(let from, let to): side = hypot(to.x - from.x, to.y - from.y)
+        case .ellipse(let rect, _), .rect(let rect, _), .triangle(let rect, _): side = min(rect.width, rect.height)
+        }
+        // 整形したときに、すでに `minimumSide` より短い図形は、それより縮めない（倍率の下限を 1 にする）
+        let lower = side > 0 ? min(Self.minimumSide / side, 1) : 1
+        return lower...Self.maximumScale
+    }
+
+    /// 軸のまわりに、`angle`（時計回りが正）だけ回し、`scale` 倍（`scaleLimits` に収める。縦横の比は、そのまま）にした図形。
+    /// 直線・矢印は、終点が、始点のまわりを回り、長さが変わる。
+    func transformed(by angle: CGFloat, scale rawScale: CGFloat) -> RecognizedShape {
+        let limits = scaleLimits
+        let scale = rawScale.isFinite ? min(max(rawScale, limits.lowerBound), limits.upperBound) : 1
+        func scaledRect(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.midX - rect.width * scale / 2, y: rect.midY - rect.height * scale / 2, width: rect.width * scale, height: rect.height * scale)
+        }
+        func movedEnd(_ from: CGPoint, _ to: CGPoint) -> CGPoint {
+            ItemHandles.rotate(CGPoint(x: from.x + (to.x - from.x) * scale, y: from.y + (to.y - from.y) * scale), about: from, by: angle)
+        }
+        switch self {
+        case .line(let from, let to): return .line(from: from, to: movedEnd(from, to))
+        case .arrow(let from, let to): return .arrow(from: from, to: movedEnd(from, to))
+        case .ellipse(let rect, let rotation): return .ellipse(rect: scaledRect(rect), rotation: ItemHandles.normalized(rotation + angle))
+        case .rect(let rect, let rotation): return .rect(rect: scaledRect(rect), rotation: ItemHandles.normalized(rotation + angle))
+        case .triangle(let rect, let rotation): return .triangle(rect: scaledRect(rect), rotation: ItemHandles.normalized(rotation + angle))
         }
     }
 

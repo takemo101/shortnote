@@ -5,6 +5,7 @@ import AppKit
 final class PaintWindowController: NSObject {
     private let panel: PaintPanel
     private let canvas = CanvasView(frame: NSRect(origin: .zero, size: CanvasView.minimumSize))
+    private let viewControls = ViewControlsView(frame: .zero)
     private let toolbar = Toolbar()
     private let exportStore = ExportStore()
     private let sizeStore = CanvasSizeStore()
@@ -95,6 +96,17 @@ final class PaintWindowController: NSObject {
             bottom.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
             bottom.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
         ])
+
+        // ビューの帯（倍率の表示・戻す。SPEC §3.2.5）：キャンバスの左下に重ねる。ビューが等倍・移動なしのときは、隠れている
+        viewControls.translatesAutoresizingMaskIntoConstraints = false
+        root.addSubview(viewControls, positioned: .above, relativeTo: canvas)
+        NSLayoutConstraint.activate([
+            viewControls.leadingAnchor.constraint(equalTo: canvas.leadingAnchor, constant: 8),
+            viewControls.bottomAnchor.constraint(equalTo: canvas.bottomAnchor, constant: -8),
+        ])
+        viewControls.onResetZoom = { [weak self] in self?.canvas.resetZoom() }
+        viewControls.onResetView = { [weak self] in self?.canvas.resetViewport() }
+        canvas.onViewportChange = { [weak self] viewport in self?.viewControls.show(viewport) }
 
         panel.contentView = root
         let fitting = root.fittingSize
