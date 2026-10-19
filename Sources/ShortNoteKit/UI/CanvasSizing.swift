@@ -15,14 +15,14 @@ final class CanvasSizing {
     /// この画面で取れる最大のキャンバス。画面の表示領域から、ウィンドウの枠（ツールバーなど）を引いて求める。
     var limits: CanvasSize.Limits {
         panel.contentView?.layoutSubtreeIfNeeded()
-        let chromeW = panel.frame.width - canvas.bounds.width, chromeH = panel.frame.height - canvas.bounds.height
+        let chromeW = panel.frame.width - canvas.canvasSize.width, chromeH = panel.frame.height - canvas.canvasSize.height
         return CanvasSize.Limits(availablePoints: CGSize(width: screenFrame.width - chromeW, height: screenFrame.height - chromeH))
     }
 
     /// ウィンドウを、キャンバスがちょうど `size` になる大きさにする（左上を動かさず、画面からはみ出す分は寄せる）。
     func apply(_ size: CanvasSize) {
         let target = size.points
-        let current = canvas.bounds.size
+        let current = canvas.canvasSize
         let old = panel.frame
         let frameSize = CGSize(width: old.width + target.width - current.width, height: old.height + target.height - current.height)
         let screen = screenFrame

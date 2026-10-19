@@ -129,36 +129,37 @@ enum ItemHandles {
     /// 回転の取っ手の位置と、枠の辺のつなぎ目（線を引く側の端）。上辺の中央から `rotationHandleDistance` 上。
     /// そこが、キャンバスの縁から `rotationHandleMargin` 以内（または外）になるときは、下辺の中央から下。
     /// どちらも収まらなければ（枠が、キャンバスの高さに近いとき）、上の位置を、縁から `rotationHandleMargin` の内側へ寄せる（取っ手が、キャンバスの外へ出て、届かなくならないように）。
-    static func rotationHandle(of shape: Shape, canvas: CGRect) -> (stem: CGPoint, handle: CGPoint) {
+    /// `scale` は、画面の 1 pt が、キャンバスの何 pt か（拡大縮小の逆数。等倍は 1）。取っ手の距離・余白は、画面での長さ。
+    static func rotationHandle(of shape: Shape, canvas: CGRect, scale: CGFloat = 1) -> (stem: CGPoint, handle: CGPoint) {
         let f = frame(of: shape), c = center(of: shape), angle = rotation(of: shape)
         func world(_ stem: CGPoint, _ handle: CGPoint) -> (stem: CGPoint, handle: CGPoint) {
             (rotate(stem, about: c, by: angle), rotate(handle, about: c, by: angle))
         }
-        let up = world(CGPoint(x: f.midX, y: f.minY), CGPoint(x: f.midX, y: f.minY - rotationHandleDistance))
-        let safe = canvas.insetBy(dx: rotationHandleMargin, dy: rotationHandleMargin)
+        let up = world(CGPoint(x: f.midX, y: f.minY), CGPoint(x: f.midX, y: f.minY - rotationHandleDistance * scale))
+        let safe = canvas.insetBy(dx: rotationHandleMargin * scale, dy: rotationHandleMargin * scale)
         if safe.contains(up.handle) { return up }
-        let down = world(CGPoint(x: f.midX, y: f.maxY), CGPoint(x: f.midX, y: f.maxY + rotationHandleDistance))
+        let down = world(CGPoint(x: f.midX, y: f.maxY), CGPoint(x: f.midX, y: f.maxY + rotationHandleDistance * scale))
         if safe.contains(down.handle) { return down }
         guard !safe.isNull, !safe.isEmpty else { return up }
         return (up.stem, CGPoint(x: min(max(up.handle.x, safe.minX), safe.maxX), y: min(max(up.handle.y, safe.minY), safe.maxY)))
     }
 
-    /// `shape` の取っ手の一覧（回転の取っ手を含む）。
-    static func handles(of shape: Shape) -> [Handle] {
+    /// `shape` の取っ手の一覧（回転の取っ手を含む）。`scale`：画面の 1 pt が、キャンバスの何 pt か（枠が小さすぎて、大きさの取っ手を出さない判定に使う）。
+    static func handles(of shape: Shape, scale: CGFloat = 1) -> [Handle] {
         switch shape {
-        case .box(let box, _): return (isTooSmallForHandles(box) ? [] : Corner.allCases.map { .corner($0) }) + [.rotate]
+        case .box(let box, _): return (isTooSmallForHandles(box, scale: scale) ? [] : Corner.allCases.map { .corner($0) }) + [.rotate]
         case .line: return [.lineStart, .lineEnd, .rotate]
         case .stroke: return [.rotate]
         }
     }
 
-    private static func isTooSmallForHandles(_ box: CGRect) -> Bool {
-        min(box.width, box.height) < minSideForHandles
+    private static func isTooSmallForHandles(_ box: CGRect, scale: CGFloat = 1) -> Bool {
+        min(box.width, box.height) < minSideForHandles * scale
     }
 
     /// `handle` の位置（画面の上の）。`shape` に無い取っ手なら `nil`。
-    static func point(of handle: Handle, in shape: Shape, canvas: CGRect) -> CGPoint? {
-        if handle == .rotate { return rotationHandle(of: shape, canvas: canvas).handle }
+    static func point(of handle: Handle, in shape: Shape, canvas: CGRect, scale: CGFloat = 1) -> CGPoint? {
+        if handle == .rotate { return rotationHandle(of: shape, canvas: canvas, scale: scale).handle }
         guard let p = gripPoint(of: handle, in: shape) else { return nil }
         return rotate(p, about: center(of: shape), by: rotation(of: shape))
     }
@@ -178,15 +179,16 @@ enum ItemHandles {
     /// `shape` の取っ手のうち、`point`（画面の上の）が掴める範囲に入るもの。回転の取っ手が先。重なるときは、近いほう。
     /// 大きさの取っ手の範囲は、外側へは `handleGrab / 2`。内側へ（枠は、その辺の中へ。直線は、もう一方の端へ向かって）は、同じ長さを、
     /// 要素が小さいとき、辺の長さ（直線は長さ）の 1/4 までに狭める（小さい要素の中を、掴んで動かせるように）。
-    static func handle(at point: CGPoint, in shape: Shape, canvas: CGRect) -> Handle? {
-        let half = handleGrab / 2
-        if distance(point, rotationHandle(of: shape, canvas: canvas).handle) <= half { return .rotate }
+    /// `scale`：画面の 1 pt が、キャンバスの何 pt か（掴める範囲は、画面での大きさ）。
+    static func handle(at point: CGPoint, in shape: Shape, canvas: CGRect, scale: CGFloat = 1) -> Handle? {
+        let half = handleGrab / 2 * scale
+        if distance(point, rotationHandle(of: shape, canvas: canvas, scale: scale).handle) <= half { return .rotate }
         let hits: [Handle]
         switch shape {
         case .stroke:
             return nil
         case .box(let box, let angle):
-            guard !isTooSmallForHandles(box) else { return nil }
+            guard !isTooSmallForHandles(box, scale: scale) else { return nil }
             let local = rotate(point, about: CGPoint(x: box.midX, y: box.midY), by: -angle)   // 回る前の枠の上で調べる
             let inX = min(half, box.width / 4), inY = min(half, box.height / 4)
             hits = Corner.allCases.filter { c in

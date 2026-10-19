@@ -240,7 +240,7 @@ guard let copy = copyBtn else { rec("AX copy button", "fail", "not found\n" + du
 let boxes = collect(app) { axs($0, "AXRole") == "AXCheckBox" && axs($0, "AXTitle") == "背景透過" }
 let radios = collect(app) { axs($0, "AXRole") == "AXRadioButton" }.sorted { (ax($0, "AXPosition").flatMap { v in var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x } ?? 0) < (ax($1, "AXPosition").flatMap { v in var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x } ?? 0) }
 let sliders = collect(app) { axs($0, "AXRole") == "AXSlider" }
-rec("C4 AX controls reachable", (boxes.count == 1 && radios.count == 5 && sliders.count == 1) ? "pass" : "fail",
+rec("C4 AX controls reachable", (boxes.count == 1 && radios.count == 6 && sliders.count == 1) ? "pass" : "fail",
     "checkbox=\(boxes.count) toolRadios=\(radios.count) slider=\(sliders.count); tool labels=\(radios.map { "t='\(axs($0, "AXTitle"))' d='\(axs($0, "AXDescription"))' h='\(axs($0, "AXHelp"))'" })")
 
 func export() -> String? {
@@ -278,14 +278,14 @@ if drag(line(pt(280, 30), pt(440, 30)), pid: pid), let p = export(), let r = loa
 
 // shapes
 /// ツールバーのセグメントの番号（左から）。SPEC §4 の並び：ペン／直線／図形（円・四角・三角）／文字／移動。キーの番号（1〜7）とは別。
-enum Seg { static let pen = 0, line = 1, shape = 2, text = 3, move = 4 }
-func selectTool(_ i: Int) -> Bool { guard radios.count == 5, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
+enum Seg { static let pen = 0, line = 1, shape = 2, text = 3, move = 4, hand = 5 }
+func selectTool(_ i: Int) -> Bool { guard radios.count == 6, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
     return wait(2) { (ax(radios[i], "AXValue") as? NSNumber)?.intValue == 1 } }
 /// 図形のメニューのマス（`shape-<ellipse|rect|triangle>-<outline|fill>`）。メニューが開いているときだけ、AX に出る。
 func shapeCell(_ shape: String, fill: Bool) -> AXUIElement? { collect(app) { axs($0, "AXIdentifier") == "shape-\(shape)-\(fill ? "fill" : "outline")" }.first }
 /// 図形のボタンの AXShowMenu でメニューを開き、マスを押す（円・四角・三角のどれかのツールに切り替わる）。閉じ切るのを少し待つ。
 func selectShape(_ shape: String, fill: Bool = false) -> Bool {
-    guard radios.count == 5 else { return false }
+    guard radios.count == 6 else { return false }
     AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
     _ = AXUIElementPerformAction(radios[Seg.shape], "AXShowMenu" as CFString)
     guard wait(3, { shapeCell(shape, fill: fill) != nil }), let cell = shapeCell(shape, fill: fill),
@@ -718,10 +718,10 @@ func keyCodeProducing(_ ch: String) -> CGKeyCode? {
 if let why = keyGuard(pid, app) {
     for id in ["K1 keys 1-5 select tools", "K2 [ ] change brush size", "K3 copy-path key", "K4-K9 reassigning shortcuts"] { rec(id, "blocked", "keyboard guard: \(why)") }
 } else {
-    let toolKeys: [(CGKeyCode, Int)] = [(20, Seg.shape), (21, Seg.text), (23, Seg.move), (19, Seg.shape), (18, Seg.pen), (22, Seg.line), (26, Seg.shape)]   // キー 3, 4, 5, 2, 1, 6, 7
+    let toolKeys: [(CGKeyCode, Int)] = [(20, Seg.shape), (21, Seg.text), (23, Seg.move), (19, Seg.shape), (18, Seg.pen), (22, Seg.line), (26, Seg.shape), (28, Seg.hand)]   // キー 3, 4, 5, 2, 1, 6, 7, 8
     var seen: [Int?] = []
     for (code, _) in toolKeys { key(code, []); seen.append(radioSelected()) }
-    rec("K1 default keys 1-7 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1,6,7 the selected segment was \(seen) (expect \(toolKeys.map { $0.1 }); the segments are pen, line, shape, text, move)")
+    rec("K1 default keys 1-8 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1,6,7,8 the selected segment was \(seen) (expect \(toolKeys.map { $0.1 }); the segments are pen, line, shape, text, move, hand)")
 
     if let smallerKey = keyCodeProducing("["), let largerKey = keyCodeProducing("]") {
         let v0 = sliderValue(); key(largerKey, []); let v1 = sliderValue(); key(smallerKey, []); let v2 = sliderValue()
@@ -1299,7 +1299,7 @@ do {
     _ = runCLI(["clear"])
     if keyGuard(pid, app) != nil {
         rec(fillIds[2], "blocked", "keyboard guard"); rec(fillIds[3], "blocked", "keyboard guard")
-    } else if radios.count == 5, selectTool(Seg.pen) {
+    } else if radios.count == 6, selectTool(Seg.pen) {
         // 図形のメニュー（AXShowMenu）で、図形と描き方を選び、そのたびに描く。最後は、ボタンを普通に押す（最後に選んだ三角・塗りつぶしのまま）
         var picks: [Bool] = []
         picks.append(selectShape("ellipse"))
@@ -1365,7 +1365,7 @@ do {
         for id in resizeIds { rec(id, "blocked", "draw image failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in resizeIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 5, selectTool(Seg.move) {
+    } else if radios.count == 6, selectTool(Seg.move) {
         let original = imageBox()!
         let exportBefore = agentExportRep().flatMap { FileManager.default.contents(atPath: $0.path) }
         let selected = click(pt(200, 150))
@@ -1415,7 +1415,7 @@ do {
         for id in shapeIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in shapeIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 5, selectTool(Seg.move) {
+    } else if radios.count == 6, selectTool(Seg.move) {
         // H4：四角（x=100, y=100, 200×100）。右下の取っ手（300, 200）を、(360, 220) へ
         let selected = click(pt(200, 150))
         let dragged = drag(line(pt(300, 200), pt(360, 220)), pid: pid)
@@ -1479,7 +1479,7 @@ do {
         for id in rotIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in rotIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 5, selectTool(Seg.move) {
+    } else if radios.count == 6, selectTool(Seg.move) {
         // H7：四角（中心 (200,150)）。回転の取っ手は、上辺の中央の 24 pt 上＝(200, 76)。右へ（時計回りに 90°）
         let selected = click(pt(200, 150))
         let rotated = drag(line(pt(200, 76), pt(300, 150)), pid: pid)
@@ -1579,7 +1579,7 @@ do {
     _ = runCLI(["clear"])
     if keyGuard(pid, app) != nil {
         rec(arrowIds[1], "blocked", "keyboard guard"); rec(arrowIds[2], "blocked", "keyboard guard")
-    } else if radios.count == 5, selectTool(Seg.pen) {
+    } else if radios.count == 6, selectTool(Seg.pen) {
         let picked = chooseLine("矢印")
         let toolIsLine = wait(2) { (ax(radios[Seg.line], "AXValue") as? NSNumber)?.intValue == 1 }
         usleep(400_000)   // メニューが閉じ切るのを待つ（閉じ切る前の最初のクリックは、メニューを閉じるだけになる）
@@ -1626,7 +1626,7 @@ do {
         return Double(p.x)
     }
     func menuItem(_ title: String) -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first }
-    if keyGuard(pid, app) != nil || radios.count != 5 || !selectTool(Seg.pen) {
+    if keyGuard(pid, app) != nil || radios.count != 6 || !selectTool(Seg.pen) {
         rec(id, "blocked", "keyboard guard or tool select failed")
     } else if let before = xOf(radios[Seg.move]) {
         AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
@@ -1667,7 +1667,7 @@ do {
         for id in marqueeIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in marqueeIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 5, selectTool(Seg.move) {
+    } else if radios.count == 6, selectTool(Seg.move) {
         // MQ1：何もない所 (10,10) から (200,100) へ。A（40）と B（140）が入り、C（300,200）は入らない
         let marquee = drag(line(pt(10, 10), pt(200, 100)), pid: pid)
         let afterMarquee = xs()
@@ -1698,6 +1698,82 @@ do {
         } else { rec(marqueeIds[1], "blocked", "drag guard refused (shiftMarquee=\(shiftMarquee) partsMoved=\(partsMoved))") }
         _ = selectTool(Seg.pen)
     } else { for id in marqueeIds { rec(id, "blocked", "tool select failed") } }
+    _ = runCLI(["clear"])
+}
+
+// ---- ビューの移動と拡大縮小（A35）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let viewIds = [
+        "VW1 hand tool: a real-pointer drag moves the view only (get and the exported PNG are unchanged); a line drawn afterwards lands where the pointer was, in canvas coordinates",
+        "VW2 Cmd+scroll over the canvas zooms in around the pointer (the point under the pointer stays; a 100 px drag draws a shorter line in canvas pt; the export stays 960x640); Cmd+0 returns to the normal view",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func pair(_ v: Any?) -> (Double, Double)? {
+        guard let a = v as? [Any], a.count == 2, let x = numOf(a[0]), let y = numOf(a[1]) else { return nil }
+        return (x, y)
+    }
+    func lines() -> [((Double, Double), (Double, Double))] {
+        (agentGet()?.items ?? []).compactMap { it in
+            guard it["op"] as? String == "line", let f = pair(it["from"]), let t = pair(it["to"]) else { return nil }
+            return (f, t)
+        }
+    }
+    func scrollWheel(at p: CGPoint, dy: Int32, flags: CGEventFlags) {
+        guard let e = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: dy, wheel2: 0, wheel3: 0) else { return }
+        e.flags = flags; e.location = p; e.post(tap: .cghidEventTap); usleep(40_000)
+    }
+    let drawn = agentDraw(##"{"op":"rect","x":100,"y":100,"w":60,"h":40,"color":"#000000"}"##)
+    if drawn.0 != 0 {
+        for id in viewIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
+    } else if keyGuard(pid, app) != nil {
+        for id in viewIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == 6, selectTool(Seg.hand) {
+        // VW1：ハンドツールで、(200,200) から (260,170) へ（内容が、右へ 60・上へ 30）
+        let exportBefore = agentExportRep().flatMap { FileManager.default.contents(atPath: $0.path) }
+        let panned = drag(line(pt(200, 200), pt(260, 170)), pid: pid)
+        let exportAfter = agentExportRep().flatMap { FileManager.default.contents(atPath: $0.path) }
+        let rects = agentGet()?.items.filter { $0["op"] as? String == "rect" }.map { numOf($0["x"]) } ?? []
+        _ = selectTool(Seg.line)
+        let drew = drag(line(pt(300, 250), pt(340, 250)), pid: pid)          // 画面の (300,250)〜(340,250)：キャンバスでは、(240,280)〜(280,280)
+        let l1 = lines().last
+        if panned, drew, let l1 {
+            let unchanged = rects == [100] && exportBefore != nil && exportBefore == exportAfter
+            let landed = abs(l1.0.0 - 240) < 1.5 && abs(l1.0.1 - 280) < 1.5 && abs(l1.1.0 - 280) < 1.5 && abs(l1.1.1 - 280) < 1.5
+            rec(viewIds[0], (unchanged && landed) ? "pass" : "fail",
+                "after the hand drag: rect x=\(rects) (expect [100]); export bytes identical=\(exportBefore != nil && exportBefore == exportAfter); line drawn at screen (300,250)-(340,250) is at canvas (\(l1.0.0),\(l1.0.1))-(\(l1.1.0),\(l1.1.1)) (expect (240,280)-(280,280))")
+        } else { rec(viewIds[0], "blocked", "drag guard refused (panned=\(panned) drew=\(drew))") }
+
+        // VW2：Cmd+0 で等倍に戻してから、(200,160)（画面の位置）で Cmd+スクロール（上へ）。同じ位置から、画面で 100 px の線を引く
+        key(29, .maskCommand)
+        usleep(300_000)
+        let anchor = pt(200, 160)
+        if hitOwner(anchor) == pid, !radios.isEmpty {
+            post(.mouseMoved, anchor)
+            for _ in 0..<6 { scrollWheel(at: anchor, dy: 30, flags: .maskCommand) }
+            usleep(400_000)
+            _ = selectTool(Seg.line)
+            let zoomedDrew = drag(line(pt(200, 160), pt(300, 160)), pid: pid)
+            let l2 = lines().last
+            let exportRep = agentExportRep()
+            if zoomedDrew, let l2, let exportRep {
+                let length = abs(l2.1.0 - l2.0.0)
+                let anchorStays = abs(l2.0.0 - 200) < 1.5 && abs(l2.0.1 - 160) < 1.5      // ポインタの下の点（キャンバスの (200,160)）は、動かない
+                let zoomedIn = length < 90                                                // 100 px の画面の長さが、キャンバスでは、短い
+                key(29, .maskCommand); usleep(300_000)
+                _ = selectTool(Seg.line)
+                let resetDrew = drag(line(pt(100, 280), pt(200, 280)), pid: pid)
+                let l3 = lines().last
+                let resetOK = resetDrew && l3 != nil && abs(l3!.0.0 - 100) < 1.5 && abs(l3!.1.0 - 200) < 1.5 && abs(l3!.0.1 - 280) < 1.5
+                rec(viewIds[1], (anchorStays && zoomedIn && exportRep.rep.pixelsWide == 960 && exportRep.rep.pixelsHigh == 640 && resetOK) ? "pass" : "fail",
+                    "after Cmd+scroll: a 100 px drag from the pointer is a canvas line from (\(l2.0.0),\(l2.0.1)) (expect 200,160) of length \(String(format: "%.1f", length)) pt (expect < 90); export \(exportRep.rep.pixelsWide)x\(exportRep.rep.pixelsHigh) (expect 960x640); after Cmd+0 a 100 px drag at (100,280) is canvas x \(l3.map { "\($0.0.0)-\($0.1.0)" } ?? "none") (expect 100-200)")
+            } else { rec(viewIds[1], "blocked", "drag guard refused or export failed (drew=\(zoomedDrew))") }
+        } else { rec(viewIds[1], "blocked", "the pointer position is not over the candidate") }
+        _ = selectTool(Seg.pen)
+    } else { for id in viewIds { rec(id, "blocked", "tool select failed") } }
+    key(29, .maskCommand)
     _ = runCLI(["clear"])
 }
 

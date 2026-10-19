@@ -1,8 +1,8 @@
 import AppKit
 
-/// 描画ツール。ツールバーのボタンの並び（ペン／直線／図形／文字／移動）とは別で、円・四角・三角は、「図形」のボタン 1 つにまとまる（`Toolbar`）。
+/// 描画ツール。ツールバーのボタンの並び（ペン／直線／図形／文字／移動／ハンド）とは別で、円・四角・三角は、「図形」のボタン 1 つにまとまる（`Toolbar`）。
 enum Tool: CaseIterable {
-    case pen, line, ellipse, rect, triangle, text, move
+    case pen, line, ellipse, rect, triangle, text, move, hand
 }
 
 /// キャンバス。ポインタ入力を、`Document` の変更（履歴つき）につなぐ。描画は `CanvasRenderer`、文字入力は `InlineTextEditor` が行う。
@@ -16,6 +16,7 @@ final class CanvasView: NSView {
             commitEditing()
             selectedItem = nil
             marquee = nil   // 範囲選択の途中で、ツールを替えたら、捨てる
+            panStart = nil  // ハンドのドラッグの途中で、ツールを替えたら、止める
             window?.invalidateCursorRects(for: self)
         }
     }
@@ -47,6 +48,14 @@ final class CanvasView: NSView {
     private var history = History<Document>()
     private var draft: Item?
     private var dragStart = CGPoint.zero
+    /// ビュー（見えている範囲。拡大縮小と移動）。画面だけの状態で、保存しない。SPEC §3.2.5。
+    /// 反映は、`NSView.bounds`（見えている範囲）で行う：`convert` が、ポインタの位置を、そのままキャンバスの座標にし、描画・カーソル・入力欄も、同じ座標系になる。
+    /// キャンバス（書き出す範囲）は、`canvasRect`（`bounds` ではない）。
+    private(set) var viewport = Viewport.identity {
+        didSet { if oldValue != viewport { applyViewport() } }
+    }
+    /// ハンドツールのドラッグの、始めのビューの位置と、ポインタ（ウィンドウの座標）。
+    private var panStart: (origin: CGPoint, pointer: CGPoint)?
     /// 移動ツールで、動かしている要素の番号と、動かし始める前の文書。
     private var move: (index: Int, base: Document)?
     /// 移動ツールで選ばれている要素の番号（小さい順。背景画像以外の、どの要素も選べる。範囲選択で複数になる）。保存しない。SPEC §3.2.3。
@@ -97,18 +106,66 @@ final class CanvasView: NSView {
 
     @objc private func windowLostKey() { commitEditing() }
 
-    /// キャンバスの大きさが変わると、書き出し PNG の寸法も変わる。
+    /// キャンバスの大きさが変わると、書き出し PNG の寸法も変わる。ビューの倍率と位置は保つ（見えている範囲だけ、直す）。
     override func setFrameSize(_ newSize: NSSize) {
         let resized = newSize != frame.size
         super.setFrameSize(newSize)
+        applyViewport()
         if resized { onChange?() }
     }
 
     override func resetCursorRects() {
         switch tool {
         case .text: addCursorRect(bounds, cursor: .iBeam)
-        case .move: addCursorRect(bounds, cursor: .openHand)
+        case .hand: addCursorRect(bounds, cursor: panStart == nil ? .openHand : .closedHand)
+        case .move: addCursorRect(bounds, cursor: .arrow)
         default: addCursorRect(bounds, cursor: .crosshair)
+        }
+    }
+
+    // MARK: - ビュー（SPEC §3.2.5）
+
+    /// キャンバス（書き出す範囲）。大きさは、画面の大きさ（`frame`）で、ビューを動かしても変わらない。`bounds` は、見えている範囲。
+    var canvasRect: CGRect { CGRect(origin: .zero, size: frame.size) }
+    var canvasSize: CGSize { frame.size }
+
+    private func applyViewport() {
+        let fixed = viewport.clamped(viewSize: frame.size)
+        if fixed != viewport { viewport = fixed; return }
+        bounds = NSRect(origin: fixed.origin, size: CGSize(width: frame.width / fixed.zoom, height: frame.height / fixed.zoom))
+        needsDisplay = true
+        window?.invalidateCursorRects(for: self)
+    }
+
+    /// ビューを、等倍・動かしていない状態に戻す。
+    func resetViewport() { viewport = .identity }
+
+    /// 倍率を `factor` 倍にする。`anchor`（キャンバスの座標）の点は、画面の同じ位置に残る。
+    func zoomViewport(by factor: CGFloat, at anchor: CGPoint) {
+        viewport = viewport.zoomed(by: factor, anchor: anchor, viewSize: frame.size)
+    }
+
+    /// 画面で `delta`（右・下が正）だけ、内容が動くように、ビューを動かす。
+    func panViewport(byScreen delta: CGSize) {
+        viewport = viewport.panned(byScreen: delta, viewSize: frame.size)
+    }
+
+    /// トラックパッドのピンチ：拡大縮小（ポインタの位置が動かない）。ハンドのドラッグの途中は、受け付けない（ドラッグの基準が、ずれて、ビューが跳ぶため）。
+    override func magnify(with event: NSEvent) {
+        guard panStart == nil else { return }
+        zoomViewport(by: 1 + event.magnification, at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// Cmd+スクロール：拡大縮小（ホイール・指を上へ回すと拡大。システムのスクロールの向きの設定には、よらない）。
+    /// Cmd なしのスクロール（2 本指のスワイプ）：ビューが動く（向きは、システムの設定に従う）。ハンドのドラッグの途中は、受け付けない。
+    override func scrollWheel(with event: NSEvent) {
+        guard panStart == nil else { return }
+        let unit: CGFloat = event.hasPreciseScrollingDeltas ? 1 : 10   // マウスのホイールは、行の単位
+        if event.modifierFlags.contains(.command) {
+            let physicalUp = event.isDirectionInvertedFromDevice ? -event.scrollingDeltaY : event.scrollingDeltaY
+            zoomViewport(by: exp(physicalUp * unit / 100), at: convert(event.locationInWindow, from: nil))
+        } else {
+            panViewport(byScreen: CGSize(width: event.scrollingDeltaX * unit, height: event.scrollingDeltaY * unit))
         }
     }
 
@@ -214,7 +271,7 @@ final class CanvasView: NSView {
 
     /// 確定済みの内容の PNG。入力中の文字は、確定せず、含めない。
     func renderCommittedPNG() -> Data? {
-        CanvasRenderer.pngData(committedDocument, size: bounds.size, transparent: transparent)
+        CanvasRenderer.pngData(committedDocument, size: canvasSize, transparent: transparent)
     }
 
     // MARK: - 画像
@@ -233,14 +290,14 @@ final class CanvasView: NSView {
     @discardableResult
     func pasteImages() -> Bool {
         commitEditing()
-        return place(ImageIntake.images(from: .general), at: CGPoint(x: bounds.midX, y: bounds.midY))
+        return place(ImageIntake.images(from: .general), at: CGPoint(x: canvasRect.midX, y: canvasRect.midY))
     }
 
     /// ファイル選択で選ばれた画像を、中央に置く。
     @discardableResult
     func addImages(at urls: [URL]) -> Bool {
         commitEditing()
-        return place(ImageIntake.images(at: urls), at: CGPoint(x: bounds.midX, y: bounds.midY))
+        return place(ImageIntake.images(at: urls), at: CGPoint(x: canvasRect.midX, y: canvasRect.midY))
     }
 
     /// 取り込んだ画像を、`center` を中心に置く（貼り付け・ドロップ・ファイル選択で共通）。複数枚は少しずらして、全部見えるようにする。
@@ -262,21 +319,21 @@ final class CanvasView: NSView {
 
     /// キャンバスの 70% に収まるよう縮小し（拡大はしない）、`center` を中心にした枠。
     private func boxForPlacing(_ image: ImportedImage, centeredAt center: CGPoint) -> CGRect {
-        let s = min(bounds.width * 0.7 / image.pointSize.width, bounds.height * 0.7 / image.pointSize.height, 1)
+        let s = min(canvasRect.width * 0.7 / image.pointSize.width, canvasRect.height * 0.7 / image.pointSize.height, 1)
         let size = CGSize(width: image.pointSize.width * s, height: image.pointSize.height * s)
         return CGRect(x: center.x - size.width / 2, y: center.y - size.height / 2, width: size.width, height: size.height)
     }
 
     /// 背景画像の枠。現在のキャンバスに収まるよう、縦横比を保って中央に置く（拡大はしない）。
     private func fitted(_ size: CGSize) -> CGRect {
-        Placement.fitted(size, in: bounds.size)
+        Placement.fitted(size, in: canvasSize)
     }
 
     // MARK: - ポインタ
 
     /// ポインタの位置（キャンバスの座標）。キャンバスの外へ出たら、縁の位置に丸める（SPEC §3.2）。
     private func location(_ event: NSEvent) -> CGPoint {
-        convert(event.locationInWindow, from: nil).clamped(to: bounds)
+        convert(event.locationInWindow, from: nil).clamped(to: canvasRect)
     }
 
     /// 筆圧はタブレット入力のときだけ使う。トラックパッドの感圧では太さを変えない。
@@ -287,6 +344,7 @@ final class CanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         commitEditing()
         marquee = nil       // 前の範囲選択が、離す操作を受けずに残っていたら、捨てる（次のドラッグを、乗っ取らないように）
+        panStart = nil      // ハンドのドラッグも、同じ（離す操作が届かなかったとき、次のドラッグが、すべてパンにならないように）
         let p = location(event)
         dragStart = p
         switch tool {
@@ -302,9 +360,13 @@ final class CanvasView: NSView {
             draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize, arrow: lineArrow)
         case .text:
             beginText(at: p)
+        case .hand:
+            panStart = (viewport.origin, event.locationInWindow)
+            NSCursor.closedHand.set()
         case .move:
-            if let index = selectedItem, let target = document.resizeTarget(at: index), let handle = ItemHandles.handle(at: p, in: target.shape, canvas: bounds),
-               let at = ItemHandles.point(of: handle, in: target.shape, canvas: bounds) {
+            if let index = selectedItem, let target = document.resizeTarget(at: index),
+               let handle = ItemHandles.handle(at: p, in: target.shape, canvas: canvasRect, scale: viewport.scale),
+               let at = ItemHandles.point(of: handle, in: target.shape, canvas: canvasRect, scale: viewport.scale) {
                 move = (index, document)
                 resizing = (handle, CGSize(width: at.x - p.x, height: at.y - p.y), ItemHandles.angle(from: ItemHandles.center(of: target.shape), to: p))
             } else if !event.modifierFlags.contains(.shift), let index = document.topItemIndex(at: p) {
@@ -326,6 +388,12 @@ final class CanvasView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
+        if let pan = panStart {
+            // ハンドツール：ポインタ（ウィンドウの座標。上が正）の動きの分だけ、内容が動く。始めの位置からの差で決める（動かしている間に、位置が、ずれていかない）
+            let delta = CGSize(width: event.locationInWindow.x - pan.pointer.x, height: -(event.locationInWindow.y - pan.pointer.y))
+            viewport = Viewport(zoom: viewport.zoom, origin: pan.origin).panned(byScreen: delta, viewSize: frame.size)
+            return
+        }
         let p = location(event)
         if marquee != nil {
             marquee?.current = p
@@ -342,14 +410,14 @@ final class CanvasView: NSView {
                     }
                     // 回した結果、掴める範囲が、キャンバスの中にほとんど残らなくなる向きへは、回さない（直前の向きのまま。移動と同じ 16 pt の規則）
                     guard let rotated = move.base.rotating(itemAt: move.index, by: delta),
-                          rotated.keepsGrabArea(at: move.index, since: move.base, in: bounds) else { return }
+                          rotated.keepsGrabArea(at: move.index, since: move.base, in: canvasRect) else { return }
                     document = rotated
                     needsDisplay = true
                     return
                 }
                 // 掴んだ差を足したあとも、縁に丸める（SPEC §3.2）。いま縁の外にある取っ手は、その位置まで（触っただけで、縁へ跳ねない）
-                let grabbedAt = ItemHandles.point(of: resizing.handle, in: target.shape, canvas: bounds) ?? p
-                let pointer = CGPoint(x: p.x + resizing.offset.width, y: p.y + resizing.offset.height).clamped(to: bounds.union(CGRect(origin: grabbedAt, size: .zero)))
+                let grabbedAt = ItemHandles.point(of: resizing.handle, in: target.shape, canvas: canvasRect, scale: viewport.scale) ?? p
+                let pointer = CGPoint(x: p.x + resizing.offset.width, y: p.y + resizing.offset.height).clamped(to: canvasRect.union(CGRect(origin: grabbedAt, size: .zero)))
                 let item = move.base.items[move.index]
                 if target.kind == .text, case .box(let box, let angle) = target.shape, case .corner(let corner) = resizing.handle, case .text(let text, _) = item.content {
                     // 文字は、常に等倍：枠の倍率で、文字の大きさを変え、その大きさの枠を、反対側の角が動かないよう置く
@@ -371,12 +439,12 @@ final class CanvasView: NSView {
                 return
             }
             if let group = moveGroup {
-                guard let moved = move.base.translatingItems(at: group, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
+                guard let moved = move.base.translatingItems(at: group, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: canvasRect) else { return }
                 document = moved
                 needsDisplay = true
                 return
             }
-            guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: bounds) else { return }
+            guard let moved = move.base.translatingItem(at: move.index, by: CGSize(width: p.x - dragStart.x, height: p.y - dragStart.y), keepingGrabAreaIn: canvasRect) else { return }
             document = moved
             needsDisplay = true
             return
@@ -401,12 +469,18 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if panStart != nil {
+            panStart = nil
+            window?.invalidateCursorRects(for: self)
+            if tool == .hand { NSCursor.openHand.set() }
+            return
+        }
         if let area = marquee {
             // 範囲選択を終える：外接する範囲が、範囲にすっぽり入っている要素を選ぶ（取り消しの段にはならない）
             marquee = nil
             let rect = CGRect(x: min(area.start.x, area.current.x), y: min(area.start.y, area.current.y),
                               width: abs(area.current.x - area.start.x), height: abs(area.current.y - area.start.y))
-            selectedItems = document.itemIndices(containedIn: rect, canvas: bounds)
+            selectedItems = document.itemIndices(containedIn: rect, canvas: canvasRect)
             needsDisplay = true
             return
         }
@@ -476,18 +550,31 @@ final class CanvasView: NSView {
     /// ドロップした位置を中心に、画像を足す。
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         commitEditing()
-        return place(ImageIntake.images(from: sender.draggingPasteboard), at: convert(sender.draggingLocation, from: nil))
+        return place(ImageIntake.images(from: sender.draggingPasteboard), at: dropLocation(sender.draggingLocation))
+    }
+
+    /// ドロップした位置（ウィンドウの座標）を、キャンバスの座標に。ポインタと同じく、キャンバスの縁に丸める（暗い外側へ落としても、キャンバスの外へは置かない）。
+    func dropLocation(_ windowPoint: CGPoint) -> CGPoint {
+        convert(windowPoint, from: nil).clamped(to: canvasRect)
     }
 
     // MARK: - 描画と書き出し
 
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
-        CanvasRenderer.drawBackdrop(transparent: transparent, bounds: bounds, in: ctx)
+        let s = viewport.scale   // 画面の 1 pt が、キャンバスの何 pt か（枠・取っ手の画面での大きさを、拡大縮小で変えない）
+        if !viewport.isIdentity {
+            ctx.setFillColor(NSColor.underPageBackgroundColor.cgColor)   // キャンバスの外は、暗い色
+            ctx.fill(bounds)
+        }
+        CanvasRenderer.drawBackdrop(transparent: transparent, bounds: canvasRect, in: ctx)
+        ctx.saveGState()
+        ctx.clip(to: canvasRect)   // 書き出しと同じく、キャンバスの外へはみ出した分は、出さない
         CanvasRenderer.drawContent(document, draft: draft, in: ctx)
+        ctx.restoreGState()
         ctx.setStrokeColor(NSColor.separatorColor.cgColor)
-        ctx.setLineWidth(1)
-        ctx.stroke(bounds.insetBy(dx: 0.5, dy: 0.5))
+        ctx.setLineWidth(s)
+        ctx.stroke(canvasRect.insetBy(dx: 0.5 * s, dy: 0.5 * s))
         drawSelectionHandles(in: ctx)
         drawMultiSelection(in: ctx)
     }
@@ -499,7 +586,7 @@ final class CanvasView: NSView {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         ctx.setStrokeColor(NSColor.controlAccentColor.cgColor)
-        ctx.setLineWidth(1)
+        ctx.setLineWidth(viewport.scale)
         switch target.shape {
         case .box(let box, let angle):
             ctx.saveGState()
@@ -507,28 +594,28 @@ final class CanvasView: NSView {
             ctx.translateBy(x: c.x, y: c.y)
             ctx.rotate(by: angle)
             ctx.translateBy(x: -c.x, y: -c.y)
-            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.setLineDash(phase: 0, lengths: [4 * viewport.scale, 3 * viewport.scale])
             ctx.stroke(box)
             ctx.restoreGState()
         case .stroke(let frame):
-            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.setLineDash(phase: 0, lengths: [4 * viewport.scale, 3 * viewport.scale])
             ctx.stroke(frame)
             ctx.setLineDash(phase: 0, lengths: [])
         case .line:
             break
         }
-        let knob = ItemHandles.rotationHandle(of: target.shape, canvas: bounds)
+        let knob = ItemHandles.rotationHandle(of: target.shape, canvas: canvasRect, scale: viewport.scale)
         ctx.move(to: knob.stem)
         ctx.addLine(to: knob.handle)
         ctx.strokePath()
-        let r = ItemHandles.handleSize / 2
+        let r = ItemHandles.handleSize * viewport.scale / 2
         ctx.setFillColor(CGColor(gray: 1, alpha: 1))
         let circle = CGRect(x: knob.handle.x - r, y: knob.handle.y - r, width: 2 * r, height: 2 * r)
         ctx.fillEllipse(in: circle)
         ctx.strokeEllipse(in: circle)
-        let s = ItemHandles.handleSize
-        for handle in ItemHandles.handles(of: target.shape) where handle != .rotate {
-            guard let p = ItemHandles.point(of: handle, in: target.shape, canvas: bounds) else { continue }
+        let s = ItemHandles.handleSize * viewport.scale
+        for handle in ItemHandles.handles(of: target.shape, scale: viewport.scale) where handle != .rotate {
+            guard let p = ItemHandles.point(of: handle, in: target.shape, canvas: canvasRect, scale: viewport.scale) else { continue }
             let square = CGRect(x: p.x - s / 2, y: p.y - s / 2, width: s, height: s)
             ctx.fill(square)
             ctx.stroke(square)
@@ -543,13 +630,13 @@ final class CanvasView: NSView {
         defer { ctx.restoreGState() }
         let accent = NSColor.controlAccentColor
         ctx.setStrokeColor(accent.cgColor)
-        ctx.setLineWidth(1)
-        ctx.setLineDash(phase: 0, lengths: [4, 3])
+        ctx.setLineWidth(viewport.scale)
+        ctx.setLineDash(phase: 0, lengths: [4 * viewport.scale, 3 * viewport.scale])
         let frames = selectedItems.count > 1 ? selectedItems.compactMap { document.items.indices.contains($0) ? document.items[$0].bounds : nil } : []
         for frame in frames { ctx.stroke(frame) }
         if let first = frames.first {
-            let all = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -3, dy: -3)
-            ctx.setLineWidth(1.5)
+            let all = frames.dropFirst().reduce(first) { $0.union($1) }.insetBy(dx: -3 * viewport.scale, dy: -3 * viewport.scale)
+            ctx.setLineWidth(1.5 * viewport.scale)
             ctx.stroke(all)
         }
         if let area = marquee {
@@ -557,7 +644,7 @@ final class CanvasView: NSView {
                               width: abs(area.current.x - area.start.x), height: abs(area.current.y - area.start.y))
             ctx.setFillColor(accent.withAlphaComponent(0.08).cgColor)
             ctx.fill(rect)
-            ctx.setLineWidth(1)
+            ctx.setLineWidth(viewport.scale)
             ctx.stroke(rect)
         }
     }
@@ -565,6 +652,6 @@ final class CanvasView: NSView {
     /// 現在のキャンバス全体の PNG。入力中の文字は、確定してから含める。生成できなければ `nil`。
     func renderPNG() -> Data? {
         commitEditing()
-        return CanvasRenderer.pngData(document, size: bounds.size, transparent: transparent)
+        return CanvasRenderer.pngData(document, size: canvasSize, transparent: transparent)
     }
 }

@@ -124,6 +124,7 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         case .edit: return "編集"
         case .image: return "画像"
         case .tool: return "ツール"
+        case .view: return "表示"
         case .brush: return "ブラシ"
         }
     }

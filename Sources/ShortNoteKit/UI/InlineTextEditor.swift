@@ -99,7 +99,7 @@ final class InlineTextEditor: NSObject, NSTextViewDelegate {
         guard let tv = textView, let host, let lm = tv.layoutManager, let tc = tv.textContainer else { return }
         lm.ensureLayout(for: tc)
         let used = lm.usedRect(for: tc)
-        let w = min(max(used.width + 8, 40), max(40, host.bounds.width - anchor.x))
+        let w = min(max(used.width + 8, 40), max(40, host.frame.width - anchor.x))   // キャンバスの幅（`frame`）。`bounds` は、ビューの見えている範囲
         let h = max(ceil(used.height), ceil(fontSize * 1.3))
         tv.frame = NSRect(x: anchor.x, y: anchor.y, width: w, height: h)
     }

@@ -62,14 +62,14 @@ final class Toolbar: NSObject {
     }()
 
     /// ボタンの並び（左から）。円・四角・三角は、「図形」の 1 つにまとまる。
-    private static let segmentOrder: [[Tool]] = [[.pen], [.line], ShapeMenuView.shapes, [.text], [.move]]
+    private static let segmentOrder: [[Tool]] = [[.pen], [.line], ShapeMenuView.shapes, [.text], [.move], [.hand]]
 
     static func segment(for tool: Tool) -> Int {
         segmentOrder.firstIndex { $0.contains(tool) } ?? 0
     }
 
     private lazy var tools: NSSegmentedControl = {
-        let symbols = ["pencil.tip", "line.diagonal", "circle", "textformat", "arrow.up.and.down.and.arrow.left.and.right"]
+        let symbols = ["pencil.tip", "line.diagonal", "circle", "textformat", "arrow.up.and.down.and.arrow.left.and.right", "hand.raised"]
         let control = NSSegmentedControl(
             images: symbols.map { NSImage(systemSymbolName: $0, accessibilityDescription: nil) ?? NSImage() },
             trackingMode: .selectOne, target: self, action: #selector(toolChanged(_:))
@@ -99,7 +99,7 @@ final class Toolbar: NSObject {
     private lazy var slider: NSSlider = {
         let slider = NSSlider(value: 4, minValue: Double(Self.brushRange.lowerBound), maxValue: Double(Self.brushRange.upperBound), target: self, action: #selector(sizeChanged(_:)))
         slider.refusesFirstResponder = true
-        slider.widthAnchor.constraint(equalToConstant: 60).isActive = true
+        slider.widthAnchor.constraint(equalToConstant: 44).isActive = true
         return slider
     }()
 
@@ -264,6 +264,7 @@ final class Toolbar: NSObject {
         tools.setToolTip("図形（\(shapeKeys)）　押し続けると、図形と、枠だけ／塗りつぶしを選べる", forSegment: Self.segment(for: .ellipse))
         tools.setToolTip(hint("文字", .toolText), forSegment: Self.segment(for: .text))
         tools.setToolTip(hint("移動", .toolMove), forSegment: Self.segment(for: .move))
+        tools.setToolTip(hint("ハンド（ドラッグで、見えている範囲を動かす。ピンチ・Cmd+スクロールで拡大縮小）", .toolHand), forSegment: Self.segment(for: .hand))
         pickButton.toolTip = hint("画像を追加…", .openImage)
         copyButton.toolTip = hint("書き出した画像のパスをコピー", .copyPath)
         clearButton.toolTip = hint("描いたものをすべて消す（背景画像は残る。取り消しで戻せる）", .clearCanvas)

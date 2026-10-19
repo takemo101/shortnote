@@ -164,6 +164,8 @@ final class PaintWindowController: NSObject {
         case .toolEllipse: select(.ellipse)
         case .toolRect: select(.rect)
         case .toolTriangle: select(.triangle)
+        case .toolHand: select(.hand)
+        case .viewReset: canvas.resetViewport()
         case .toolText: select(.text)
         case .toolMove: select(.move)
         case .toolLine: select(.line)
@@ -273,7 +275,7 @@ extension PaintWindowController: AgentCanvas {
         panel.orderFrontRegardless()
     }
 
-    var agentCanvasSize: CGSize { canvas.bounds.size }
+    var agentCanvasSize: CGSize { canvas.canvasSize }
 
     func agentAppend(_ items: [Item]) {
         canvas.appendFromAgent(items)
@@ -285,7 +287,7 @@ extension PaintWindowController: AgentCanvas {
     func agentSnapshot() -> AgentSnapshot {
         let document = canvas.committedDocument
         return AgentSnapshot(
-            size: canvas.bounds.size,
+            size: canvas.canvasSize,
             background: document.background == nil ? nil : document.backgroundRect,
             editing: canvas.isInteracting,
             items: document.items
