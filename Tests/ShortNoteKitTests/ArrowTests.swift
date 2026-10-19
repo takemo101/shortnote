@@ -152,25 +152,25 @@ struct ArrowUITests {
         #expect(c.document.items.map(\.arrow) == [.none, .end])
     }
 
-    @Test("ツールバー：直線のボタンにメニュー（線／矢印／両端の矢印）。選ぶと、通知・チェック・ツールの切り替えが起きる。円・四角のメニューとは別")
+    @Test("ツールバー：直線のボタンにメニュー（線／矢印／両端の矢印）。選ぶと、通知・チェック・ツールの切り替えが起きる。図形のメニューとは別")
     func toolbarMenu() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
-        let menu = try #require(control.menu(forSegment: Tool.line.rawValue))
+        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 5 })
+        let menu = try #require(control.menu(forSegment: Toolbar.segment(for: .line)))
         #expect(menu.items.map(\.title) == ["線", "矢印", "両端の矢印"])
         #expect(menu.items.map(\.state) == [.on, .off, .off])
         #expect(menu.items.allSatisfy { $0.image != nil })
-        #expect(control.showsMenuIndicator(forSegment: Tool.line.rawValue))
-        #expect(control.menu(forSegment: Tool.pen.rawValue) == nil)
+        #expect(control.showsMenuIndicator(forSegment: Toolbar.segment(for: .line)))
+        #expect(control.menu(forSegment: Toolbar.segment(for: .pen)) == nil)
 
         var arrows: [Item.Arrow] = [], tools: [Tool] = [], fills: [String] = []
         toolbar.onSelectArrow = { arrows.append($0) }
         toolbar.onSelectTool = { tools.append($0) }
         toolbar.onSelectFill = { fills.append("\($0)=\($1)") }
-        control.selectedSegment = Tool.pen.rawValue
+        control.selectedSegment = Toolbar.segment(for: .pen)
 
         menu.performActionForItem(at: 2)
-        #expect(arrows == [.both] && tools == [.line] && control.selectedSegment == Tool.line.rawValue && fills.isEmpty)
+        #expect(arrows == [.both] && tools == [.line] && control.selectedSegment == Toolbar.segment(for: .line) && fills.isEmpty)
         #expect(menu.items.map(\.state) == [.off, .off, .on])
         menu.performActionForItem(at: 1)
         #expect(arrows == [.both, .end] && menu.items.map(\.state) == [.off, .on, .off])
@@ -185,14 +185,14 @@ struct ArrowToolbarWidthTests {
     @Test("どの矢じりを選んでも、ボタンの幅・ツールバーの上段の幅は変わらない。ボタンの絵は、選びに合わせて変わる")
     func widthIsConstant() throws {
         let toolbar = Toolbar()
-        let control = try #require((toolbar.topRow.subviews + toolbar.topRow.subviews.flatMap(\.subviews)).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
-        let menu = try #require(control.menu(forSegment: Tool.line.rawValue))
+        let control = try #require((toolbar.topRow.subviews + toolbar.topRow.subviews.flatMap(\.subviews)).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 5 })
+        let menu = try #require(control.menu(forSegment: Toolbar.segment(for: .line)))
         let widthBefore = control.intrinsicContentSize.width, rowBefore = toolbar.topRow.fittingSize.width
-        let imageBefore = control.image(forSegment: Tool.line.rawValue)?.tiffRepresentation
+        let imageBefore = control.image(forSegment: Toolbar.segment(for: .line))?.tiffRepresentation
         menu.performActionForItem(at: 2)   // 両端の矢印（絵を作り直す）
         #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1)     // 以前は 2 pt 広がった（16×15 の絵）。半分の pt の丸めだけは許す
         #expect(toolbar.topRow.fittingSize.width == rowBefore)
-        #expect(control.image(forSegment: Tool.line.rawValue)?.tiffRepresentation != imageBefore)
+        #expect(control.image(forSegment: Toolbar.segment(for: .line))?.tiffRepresentation != imageBefore)
         menu.performActionForItem(at: 1)
         #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1 && toolbar.topRow.fittingSize.width == rowBefore)
     }

@@ -135,6 +135,14 @@ enum CanvasRenderer {
                 ctx.setLineWidth(item.size)
                 ctx.stroke(rect)
             }
+        case .triangle(let rect):
+            if item.filled {
+                drawFilled(item, in: ctx) { $0.addPath(Triangle.path(in: rect)) }
+            } else {
+                ctx.setLineWidth(item.size)
+                ctx.addPath(Triangle.path(in: rect))
+                ctx.strokePath()
+            }
         case .ellipse(let rect):
             if item.filled {
                 drawFilled(item, in: ctx) { $0.addEllipse(in: rect) }

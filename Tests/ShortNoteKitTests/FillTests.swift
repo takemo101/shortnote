@@ -130,30 +130,53 @@ struct FillUITests {
         #expect(canvas.document.items.map(\.filled) == [true, false])
     }
 
-    @Test("ツールバー：円・四角のボタンにメニュー（枠だけ／塗りつぶし）。選ぶと、通知・チェック・ツールの切り替えが起きる。選びは円と四角で別々")
-    func toolbarMenus() throws {
+    @Test("ツールバー：図形のボタンに、2 列 × 3 行のメニュー（左が枠だけ、右が塗りつぶし。上から 四角・円・三角）。マスを選ぶと、通知・印・ツールの切り替えが起きる。選びは図形ごとに別々")
+    func shapeMenu() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 6 })
-        #expect(control.menu(forSegment: Tool.pen.rawValue) == nil)
-        let ellipseMenu = try #require(control.menu(forSegment: Tool.ellipse.rawValue))
-        let rectMenu = try #require(control.menu(forSegment: Tool.rect.rawValue))
-        #expect(ellipseMenu.items.map(\.title) == ["枠だけ", "塗りつぶし"])
-        #expect(ellipseMenu.items.map(\.state) == [.on, .off])
-        #expect(control.showsMenuIndicator(forSegment: Tool.ellipse.rawValue) && control.showsMenuIndicator(forSegment: Tool.rect.rawValue))
-        #expect(!control.showsMenuIndicator(forSegment: Tool.pen.rawValue))
+        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 5 })
+        #expect(control.menu(forSegment: Toolbar.segment(for: .pen)) == nil)
+        let shapeSegment = Toolbar.segment(for: .ellipse)
+        let menu = try #require(control.menu(forSegment: shapeSegment))
+        let grid = try #require(menu.items.first?.view as? ShapeMenuView)
+        #expect(menu.items.count == 1 && control.showsMenuIndicator(forSegment: shapeSegment) && !control.showsMenuIndicator(forSegment: Toolbar.segment(for: .pen)))
+
+        func cell(_ id: String) throws -> NSButton {
+            try #require(allSubviews(grid).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == id })
+        }
+        // 配置：左の列が枠だけ、右の列が塗りつぶし。上から 四角・円・三角（座標は、下が 0）
+        let ids = ["shape-rect-outline", "shape-rect-fill", "shape-ellipse-outline", "shape-ellipse-fill", "shape-triangle-outline", "shape-triangle-fill"]
+        let frames = try ids.map { try cell($0).frame }
+        #expect(frames.count == 6 && Set(frames.map(\.minX)).count == 2 && Set(frames.map(\.minY)).count == 3)
+        #expect(frames[0].minX < frames[1].minX && frames[0].minY > frames[2].minY && frames[2].minY > frames[4].minY)
+        // 起動のときは、枠だけの円に印
+        #expect(try ids.filter { try cell($0).state == .on } == ["shape-ellipse-outline"])
+        let before = control.image(forSegment: shapeSegment)?.tiffRepresentation
 
         var fills: [String] = [], tools: [Tool] = []
         toolbar.onSelectFill = { fills.append("\($0)=\($1)") }
         toolbar.onSelectTool = { tools.append($0) }
-        control.selectedSegment = Tool.pen.rawValue
+        control.selectedSegment = Toolbar.segment(for: .pen)
 
-        ellipseMenu.performActionForItem(at: 1)                 // 円：塗りつぶし
-        #expect(fills == ["ellipse=true"] && tools == [.ellipse] && control.selectedSegment == Tool.ellipse.rawValue)
-        #expect(ellipseMenu.items.map(\.state) == [.off, .on])
-        #expect(rectMenu.items.map(\.state) == [.on, .off])     // 四角は、そのまま
-        rectMenu.performActionForItem(at: 0)                    // 四角：枠だけ
-        #expect(fills == ["ellipse=true", "rect=false"] && tools == [.ellipse, .rect])
-        ellipseMenu.performActionForItem(at: 0)
-        #expect(ellipseMenu.items.map(\.state) == [.on, .off] && fills.last == "ellipse=false")
+        try cell("shape-triangle-fill").performClick(nil)           // 三角：塗りつぶし
+        #expect(fills == ["triangle=true"] && tools == [.triangle] && control.selectedSegment == shapeSegment)
+        #expect(try ids.filter { try cell($0).state == .on } == ["shape-triangle-fill"])
+        #expect(control.image(forSegment: shapeSegment)?.tiffRepresentation != before)   // ボタンの絵が、選びに合う
+        try cell("shape-rect-outline").performClick(nil)            // 四角：枠だけ
+        #expect(fills == ["triangle=true", "rect=false"] && tools == [.triangle, .rect])
+
+        // ボタンを普通に押す：その図形（いま表している図形）のツールを選ぶだけで、描き方は、変えない
+        control.selectedSegment = Toolbar.segment(for: .pen)
+        control.sendAction(control.action, to: control.target)
+        #expect(tools.last == .pen)
+        control.selectedSegment = shapeSegment
+        control.sendAction(control.action, to: control.target)
+        #expect(tools.last == .rect && fills.count == 2)
+        // キーでツールを替えると、ボタンは、その図形になり、描き方は、その図形で最後に選んだもの（三角は、塗りつぶし）
+        toolbar.show(tool: .triangle)
+        #expect(try ids.filter { try cell($0).state == .on } == ["shape-triangle-fill"])
+        control.selectedSegment = Toolbar.segment(for: .pen)
+        control.selectedSegment = shapeSegment
+        control.sendAction(control.action, to: control.target)
+        #expect(tools.last == .triangle)
     }
 }

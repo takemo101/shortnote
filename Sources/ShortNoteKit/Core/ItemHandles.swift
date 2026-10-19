@@ -37,7 +37,7 @@ enum ItemHandles {
 
     /// 要素の形。
     enum Shape: Equatable {
-        /// 画像・円・四角・文字：回転する前の枠と、枠の中心を軸にした回転角。
+        /// 画像・円・四角・三角・文字：回転する前の枠と、枠の中心を軸にした回転角。
         case box(CGRect, rotation: CGFloat)
         case line(from: CGPoint, to: CGPoint)
         /// ペン：点の外接する範囲（大きさの取っ手は無い。回転の取っ手と点線の枠だけ）。
@@ -45,7 +45,7 @@ enum ItemHandles {
     }
 
     enum Kind: Equatable {
-        case image, ellipse, rect, text, line, pen
+        case image, ellipse, rect, triangle, text, line, pen
     }
 
     /// 取っ手を出す要素の、いまの形と、規則（要素の種類で決まる）。

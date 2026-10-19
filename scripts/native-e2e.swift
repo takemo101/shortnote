@@ -240,7 +240,7 @@ guard let copy = copyBtn else { rec("AX copy button", "fail", "not found\n" + du
 let boxes = collect(app) { axs($0, "AXRole") == "AXCheckBox" && axs($0, "AXTitle") == "背景透過" }
 let radios = collect(app) { axs($0, "AXRole") == "AXRadioButton" }.sorted { (ax($0, "AXPosition").flatMap { v in var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x } ?? 0) < (ax($1, "AXPosition").flatMap { v in var p = CGPoint.zero; AXValueGetValue(v as! AXValue, .cgPoint, &p); return p.x } ?? 0) }
 let sliders = collect(app) { axs($0, "AXRole") == "AXSlider" }
-rec("C4 AX controls reachable", (boxes.count == 1 && radios.count == 6 && sliders.count == 1) ? "pass" : "fail",
+rec("C4 AX controls reachable", (boxes.count == 1 && radios.count == 5 && sliders.count == 1) ? "pass" : "fail",
     "checkbox=\(boxes.count) toolRadios=\(radios.count) slider=\(sliders.count); tool labels=\(radios.map { "t='\(axs($0, "AXTitle"))' d='\(axs($0, "AXDescription"))' h='\(axs($0, "AXHelp"))'" })")
 
 func export() -> String? {
@@ -277,19 +277,32 @@ if drag(line(pt(280, 30), pt(440, 30)), pid: pid), let p = export(), let r = loa
 } else { rec("C6 pen stroke", "blocked", "pointer guard refused (hit target not candidate) or export failed") }
 
 // shapes
-/// ツールバーのセグメントの番号（左から）。SPEC §4 の並び：ペン／直線／円／四角／文字／移動。キーの番号（1〜6）とは別。
-enum Seg { static let pen = 0, line = 1, ellipse = 2, rect = 3, text = 4, move = 5 }
-func selectTool(_ i: Int) -> Bool { guard radios.count == 6, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
+/// ツールバーのセグメントの番号（左から）。SPEC §4 の並び：ペン／直線／図形（円・四角・三角）／文字／移動。キーの番号（1〜7）とは別。
+enum Seg { static let pen = 0, line = 1, shape = 2, text = 3, move = 4 }
+func selectTool(_ i: Int) -> Bool { guard radios.count == 5, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
     return wait(2) { (ax(radios[i], "AXValue") as? NSNumber)?.intValue == 1 } }
-if selectTool(Seg.ellipse), drag(line(pt(300, 60), pt(440, 140)), pid: pid), let p = export(), let r = load(p) {
-    let edge = darkest(r, 300, 100), mid = at(r, 370, 100)
-    rec("C8 ellipse tool (drag sets size)", (isDark(edge) && isTeal(mid)) ? "pass" : "fail", "edge lum=\(edge.lum) interior teal=\(isTeal(mid))")
+/// 図形のメニューのマス（`shape-<ellipse|rect|triangle>-<outline|fill>`）。メニューが開いているときだけ、AX に出る。
+func shapeCell(_ shape: String, fill: Bool) -> AXUIElement? { collect(app) { axs($0, "AXIdentifier") == "shape-\(shape)-\(fill ? "fill" : "outline")" }.first }
+/// 図形のボタンの AXShowMenu でメニューを開き、マスを押す（円・四角・三角のどれかのツールに切り替わる）。閉じ切るのを少し待つ。
+func selectShape(_ shape: String, fill: Bool = false) -> Bool {
+    guard radios.count == 5 else { return false }
+    AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
+    _ = AXUIElementPerformAction(radios[Seg.shape], "AXShowMenu" as CFString)
+    guard wait(3, { shapeCell(shape, fill: fill) != nil }), let cell = shapeCell(shape, fill: fill),
+          AXUIElementPerformAction(cell, kAXPressAction as CFString) == .success else { return false }
+    let on = wait(2) { (ax(radios[Seg.shape], "AXValue") as? NSNumber)?.intValue == 1 }
+    usleep(400_000)   // メニューが閉じるのを待つ（閉じ切る前の最初のクリックは、メニューを閉じるだけになる）
+    return on
+}
+if selectShape("ellipse"), drag(line(pt(300, 60), pt(440, 140)), pid: pid), let p = export(), let r = load(p) {
+    let edge = darkest(r, 300, 100), mid = at(r, 370, 100), corner = at(r, 301, 61)   // 楕円は、外接する四角の角に届かない
+    rec("C8 ellipse tool (drag sets size)", (isDark(edge) && isTeal(mid) && !isDark(corner)) ? "pass" : "fail", "edge lum=\(edge.lum) interior teal=\(isTeal(mid)) box corner is not dark (round)=\(!isDark(corner))")
 } else { rec("C8 ellipse tool", "blocked", "tool select / drag guard failed") }
 var rectPath = ""
-if selectTool(Seg.rect), drag(line(pt(300, 170), pt(440, 270)), pid: pid), let p = export(), let r = load(p) {
+if selectShape("rect"), drag(line(pt(300, 170), pt(440, 270)), pid: pid), let p = export(), let r = load(p) {
     rectPath = p
-    let edge = darkest(r, 300, 220), mid = at(r, 370, 220)
-    rec("C9 rectangle tool (drag sets size)", (isDark(edge) && isTeal(mid)) ? "pass" : "fail", "edge lum=\(edge.lum) interior teal=\(isTeal(mid))")
+    let edge = darkest(r, 300, 220), mid = at(r, 370, 220), corner = at(r, 301, 171)   // 四角は、外接する四角の角まで線が届く
+    rec("C9 rectangle tool (drag sets size)", (isDark(edge) && isTeal(mid) && isDark(corner)) ? "pass" : "fail", "edge lum=\(edge.lum) interior teal=\(isTeal(mid)) box corner is dark (square)=\(isDark(corner))")
 } else { rec("C9 rectangle tool", "blocked", "tool select / drag guard failed") }
 
 // undo / redo (keyboard — guarded)
@@ -705,10 +718,10 @@ func keyCodeProducing(_ ch: String) -> CGKeyCode? {
 if let why = keyGuard(pid, app) {
     for id in ["K1 keys 1-5 select tools", "K2 [ ] change brush size", "K3 copy-path key", "K4-K9 reassigning shortcuts"] { rec(id, "blocked", "keyboard guard: \(why)") }
 } else {
-    let toolKeys: [(CGKeyCode, Int)] = [(20, Seg.rect), (21, Seg.text), (23, Seg.move), (19, Seg.ellipse), (18, Seg.pen), (22, Seg.line)]   // キー 3, 4, 5, 2, 1, 6
+    let toolKeys: [(CGKeyCode, Int)] = [(20, Seg.shape), (21, Seg.text), (23, Seg.move), (19, Seg.shape), (18, Seg.pen), (22, Seg.line), (26, Seg.shape)]   // キー 3, 4, 5, 2, 1, 6, 7
     var seen: [Int?] = []
     for (code, _) in toolKeys { key(code, []); seen.append(radioSelected()) }
-    rec("K1 default keys 1-6 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1,6 the selected segment was \(seen) (expect \(toolKeys.map { $0.1 }); the segments are pen, line, ellipse, rect, text, move)")
+    rec("K1 default keys 1-7 select tools (the toolbar follows)", seen == toolKeys.map { Optional($0.1) } ? "pass" : "fail", "after keys 3,4,5,2,1,6,7 the selected segment was \(seen) (expect \(toolKeys.map { $0.1 }); the segments are pen, line, shape, text, move)")
 
     if let smallerKey = keyCodeProducing("["), let largerKey = keyCodeProducing("]") {
         let v0 = sliderValue(); key(largerKey, []); let v1 = sliderValue(); key(smallerKey, []); let v2 = sliderValue()
@@ -742,9 +755,9 @@ if let why = keyGuard(pid, app) {
         let msg5 = scElement("shortcuts-message").map { axs($0, "AXValue") } ?? ""
         closeShortcutsAndShowPanel()
         var effect = false, oldDead = false
-        if keyGuard(pid, app) == nil, selectTool(Seg.rect) {
+        if keyGuard(pid, app) == nil, selectShape("rect") {
             key(35, []); effect = radioSelected() == Seg.pen          // P でペンになる
-            _ = selectTool(Seg.rect); key(18, []); oldDead = radioSelected() == Seg.rect   // 1 では、もう変わらない
+            _ = selectShape("rect"); key(18, []); oldDead = radioSelected() == Seg.shape   // 1 では、もう変わらない
         }
         rec("K5 a reassigned key works, the old key stops, and the change is saved", (changed && effect && oldDead && (saved || !bundleIdOK)) ? "pass" : "fail",
             "window shows P=\(changed) P selects pen=\(effect) old '1' ignored=\(oldDead) saved=\(saved) message='\(msg5)'")
@@ -788,7 +801,7 @@ if let why = keyGuard(pid, app) {
             let cleared = bundleIdOK ? wait(2) { readDefault("keyBindings") == nil } : true
             closeShortcutsAndShowPanel()
             var works = false
-            if keyGuard(pid, app) == nil, selectTool(Seg.rect) { key(18, []); works = radioSelected() == Seg.pen }
+            if keyGuard(pid, app) == nil, selectShape("rect") { key(18, []); works = radioSelected() == Seg.pen }
             rec("K9 reset-all restores the defaults and removes the saved overrides", (pressed && back && cleared && works) ? "pass" : "fail", "pressed=\(pressed) window shows 1=\(back) saved value removed=\(cleared) '1' selects pen again=\(works)")
         } else { rec("K6-K9 conflict / reserved / cancel / reset-all", "blocked", "could not reopen the shortcuts window") }
     } else { rec("K4-K9 shortcuts window", "blocked", "the status menu item did not open a focused 'ショートカット' window") }
@@ -916,7 +929,7 @@ if let why = keyGuard(pid, app) {
     key(40, .maskCommand)   // 描いたものを消す
 
     // B3：四角を、右の縁の外（余白）までドラッグする。右の辺は、キャンバスの縁にある（外の余白では、書き出しに出ない）。
-    if selectTool(Seg.rect), drag(line(pt(300, 20), pt(W + 8, 50)), pid: pid), let r = exportImg() {
+    if selectShape("rect"), drag(line(pt(300, 20), pt(W + 8, 50)), pid: pid), let r = exportImg() {
         let edge = darkest(r, W - 1, 35)
         rec(edgeIds[2], isDark(edge) ? "pass" : "fail", "dark pixel at the right edge (x=\(Int(W) - 1), y=35, between the top and bottom sides): lum=\(String(format: "%.2f", edge.lum)); the pointer ended 8 pt outside the canvas")
     } else { rec(edgeIds[2], "blocked", "tool select / drag guard / export failed") }
@@ -924,7 +937,7 @@ if let why = keyGuard(pid, app) {
 
     // B1・B2：キャンバスの上の縁に近い四角を、上へ（ツールバーの帯まで）動かす。
     var rectDrawn = false
-    if selectTool(Seg.rect), drag(line(pt(100, 12), pt(180, 42)), pid: pid), let r0 = exportImg() { rectDrawn = countDark(r0, 90, 0, 190, 50) > 200 }
+    if selectShape("rect"), drag(line(pt(100, 12), pt(180, 42)), pid: pid), let r0 = exportImg() { rectDrawn = countDark(r0, 90, 0, 190, 50) > 200 }
     if rectDrawn, selectTool(Seg.move), drag(line(pt(140, 27), pt(140, -30)), pid: pid), let r1 = exportImg() {
         let kept = countDark(r1, 90, 0, 190, 40)
         rec(edgeIds[0], kept > 200 ? "pass" : "fail", "dark pixels of the moved rectangle left inside the canvas (x 90-190, y 0-40) = \(kept) (need > 200; 0 means it was carried out of the canvas and cannot be seen or grabbed)")
@@ -942,7 +955,7 @@ if let why = keyGuard(pid, app) {
     // B4：楕円の外接する範囲の、何も描かれていない左上の角（外側）を掴んで、右下の外（余白・下の帯）まで動かす。
     // 掴んだ点だけをキャンバスの中に残しても、楕円の輪は、角から遠いので、完全に外へ出てしまう。掴める範囲が残っていれば、また掴んで戻せる。
     let H = Double(cf.height)
-    if selectTool(Seg.ellipse), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
+    if selectShape("ellipse"), drag(line(pt(100, 100), pt(200, 200)), pid: pid), isDark(darkest(exportImg() ?? NSBitmapImageRep(), 100, 150)),
        selectTool(Seg.move), drag(line(pt(103, 103), pt(W + 8, H + 20)), pid: pid) {
         // 掴める範囲（外接する範囲＋4 pt）の、16 pt が、右下の角に残る。そこ（W-10, H-10）を掴んで、左上へ戻す。
         // 選ばれた図形の角は、取っ手になる（SPEC §3.2.3）ので、何もない所をクリックして、選びを外してから掴む
@@ -1236,8 +1249,8 @@ if agentSocketPath.utf8.count > 103 {
 let fillIds = [
     "Y1 render: fill:true paints the inside of a rect and an ellipse; outlines and the box corner outside the ellipse stay blank",
     "Y2 draw with fill:true: get reports fill, and the exported inside differs from before while the outline rect's inside does not",
-    "Y3 the ellipse/rect buttons: a plain press only selects the tool; the menu (AXShowMenu) sets filled / outline per tool and the drawn shapes follow",
-    "Y4 pressing and holding the ellipse button with the real mouse opens the menu (a menu window appears); Esc closes it",
+    "Y3 the shape button: the menu (AXShowMenu, a 2x3 grid) picks the shape and outline/filled per shape (ellipse/rect/triangle) and the drawn shapes follow; a plain press selects the last shape tool without a menu",
+    "Y4 pressing and holding the shape button with the real mouse opens the 2x3 menu (a menu window appears, six cells in AX); Esc closes it",
 ]
 do {
     canvasWidthPt = 480
@@ -1252,6 +1265,16 @@ do {
         rec(fillIds[0], (isRedPx(redIn) && blueIn.b > 0.9 && blueIn.r < 0.1 && white(corner) && white(outlineIn)) ? "pass" : "fail",
             "rect inside red=\(isRedPx(redIn)); ellipse inside blue=\(blueIn.b > 0.9 && blueIn.r < 0.1); the box corner outside the ellipse blank=\(white(corner)); outline rect inside blank=\(white(outlineIn)); stderr='\(y1.2)'")
     } else { rec(fillIds[0], "blocked", "render failed: exit=\(y1.0) \(y1.2)") }
+    // TR1：render で三角形（アプリに触れない）。頂点は上辺の中央、底辺は下辺。回した三角形は、頂点が右を向く
+    let trOut = "\(ydir)/triangle.png"
+    let tr = runCLI(["render", "-", "-", "-o", trOut], stdin: ##"{"version":1,"ops":[{"op":"triangle","x":100,"y":100,"w":120,"h":100,"color":"#ff0000","fill":true},{"op":"triangle","x":260,"y":100,"w":120,"h":100,"color":"#0000ff","fill":true,"rotate":90}]}"##)
+    if tr.0 == 0, let rep = load(trOut) {
+        let white = { (p: Px) in p.r > 0.95 && p.g > 0.95 && p.b > 0.95 }
+        let redCentre = isRedPx(at(rep, 160, 170)), redBase = isRedPx(at(rep, 130, 195)), cornerBlank = white(at(rep, 106, 104)), apexPainted = white(at(rep, 160, 102)) == false
+        let b = at(rep, 320, 150), blueCentre = b.b > 0.9 && b.r < 0.1, rightTip = at(rep, 362, 150), tipBlue = rightTip.b > 0.9 && rightTip.r < 0.1, oldApexBlank = white(at(rep, 320, 104))
+        rec("TR1 render: a filled triangle has its apex at the middle of the top side and its base at the bottom; rotate:90 turns the apex to the right", (redCentre && redBase && cornerBlank && apexPainted && blueCentre && tipBlue && oldApexBlank) ? "pass" : "fail",
+            "red centre=\(redCentre) base-left inside=\(redBase) top-left corner blank=\(cornerBlank) apex painted=\(apexPainted); rotated: centre blue=\(blueCentre) right tip blue=\(tipBlue) old apex spot blank=\(oldApexBlank); stderr='\(tr.2)'")
+    } else { rec("TR1 render triangle", "blocked", "render failed: exit=\(tr.0) \(tr.2)") }
 
     // Y2：draw（常駐中のアプリ）
     _ = runCLI(["clear"])
@@ -1273,63 +1296,53 @@ do {
         AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &s)
         return CGRect(origin: p, size: s)
     }
-    func fillMenuItem(_ title: String) -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first }
-    func chooseFill(_ seg: Int, _ title: String) -> Bool {
-        AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
-        guard AXUIElementPerformAction(radios[seg], "AXShowMenu" as CFString) == .success || true else { return false }
-        guard wait(3, { fillMenuItem(title) != nil }), let item = fillMenuItem(title) else { return false }
-        return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
-    }
     _ = runCLI(["clear"])
     if keyGuard(pid, app) != nil {
         rec(fillIds[2], "blocked", "keyboard guard"); rec(fillIds[3], "blocked", "keyboard guard")
-    } else if radios.count == 6, selectTool(Seg.pen) {
-        // 普通に押す：選択だけ。塗りは、まだ枠だけ
-        var ok = selectTool(Seg.ellipse) && drag(line(pt(60, 60), pt(160, 140)), pid: pid)
-        var shots: [NSBitmapImageRep?] = [exportImg()]
-        // 円：塗りつぶしを選ぶ（そのツールに切り替わる）。四角は、枠だけのまま
-        _ = selectTool(Seg.pen)
-        let pickedFill = chooseFill(Seg.ellipse, "塗りつぶし")
-        let toolIsEllipse = wait(2) { (ax(radios[Seg.ellipse], "AXValue") as? NSNumber)?.intValue == 1 }
-        usleep(400_000)   // メニューが閉じるのを待つ（閉じ切る前の最初のクリックは、メニューを閉じるだけになる）
+    } else if radios.count == 5, selectTool(Seg.pen) {
+        // 図形のメニュー（AXShowMenu）で、図形と描き方を選び、そのたびに描く。最後は、ボタンを普通に押す（最後に選んだ三角・塗りつぶしのまま）
+        var picks: [Bool] = []
+        picks.append(selectShape("ellipse"))
+        var ok = drag(line(pt(60, 60), pt(160, 140)), pid: pid)
+        picks.append(selectShape("ellipse", fill: true))
         ok = ok && drag(line(pt(220, 60), pt(320, 140)), pid: pid)
-        shots.append(exportImg())
-        // 四角：普通に押して描く（枠だけのまま）
-        ok = ok && selectTool(Seg.rect) && drag(line(pt(60, 180), pt(160, 260)), pid: pid)
-        shots.append(exportImg())
-        // 円を、枠だけへ戻して描く
-        _ = selectTool(Seg.pen)
-        let pickedOutline = chooseFill(Seg.ellipse, "枠だけ")
-        _ = wait(2) { (ax(radios[Seg.ellipse], "AXValue") as? NSNumber)?.intValue == 1 }
-        usleep(400_000)
+        picks.append(selectShape("rect"))
+        ok = ok && drag(line(pt(60, 180), pt(160, 260)), pid: pid)
+        picks.append(selectShape("triangle", fill: true))
         ok = ok && drag(line(pt(220, 180), pt(320, 260)), pid: pid)
-        shots.append(exportImg())
-        if let s = shots.last!, ok {
-            let g = agentGet()?.items.map { ($0["op"] as? String ?? "?", $0["fill"] as? Bool ?? false) } ?? []
-            let expected: [(String, Bool)] = [("ellipse", false), ("ellipse", true), ("rect", false), ("ellipse", false)]
-            let same = g.count == 4 && zip(g, expected).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
-            let centreDark = [(110.0, 100.0), (270.0, 100.0), (110.0, 220.0), (270.0, 220.0)].map { isDark(at(s, $0.0, $0.1)) }
-            rec(fillIds[2], (pickedFill && toolIsEllipse && pickedOutline && same && centreDark == [false, true, false, false]) ? "pass" : "fail",
-                "menu picks: fill=\(pickedFill) tool switched to ellipse=\(toolIsEllipse) outline=\(pickedOutline); drawn shapes (op, fill)=\(g) (expect ellipse:false, ellipse:true, rect:false, ellipse:false); inside of each shape dark=\(centreDark) (expect false,true,false,false)")
-        } else { rec(fillIds[2], "blocked", "a drag guard refused or an export failed") }
-
-        // Y4：実機のマウスで、円のボタンを押し続ける
         _ = selectTool(Seg.pen)
-        if let r = axRect(radios[Seg.ellipse]), hitOwner(CGPoint(x: r.midX, y: r.midY)) == pid {
+        let plainPress = selectTool(Seg.shape)            // 普通に押す：メニューなしで、図形のツール（三角・塗りつぶし）
+        ok = ok && drag(line(pt(340, 60), pt(440, 140)), pid: pid)
+        let shot = exportImg()
+        if let s = shot, ok {
+            let g = agentGet()?.items.map { ($0["op"] as? String ?? "?", $0["fill"] as? Bool ?? false) } ?? []
+            let expected: [(String, Bool)] = [("ellipse", false), ("ellipse", true), ("rect", false), ("triangle", true), ("triangle", true)]
+            let same = g.count == 5 && zip(g, expected).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
+            let centreDark = [(110.0, 100.0), (270.0, 100.0), (110.0, 220.0), (270.0, 240.0), (390.0, 120.0)].map { isDark(at(s, $0.0, $0.1)) }
+            // 三角形の形：頂点は上辺の中央、底辺は下辺。(220,180)-(320,260) の枠で、左上の隅 (225,185) は外、底辺の近く (240,255) は内
+            let apexSide = !isDark(at(s, 225, 185)) && isDark(at(s, 270, 250)) && isDark(at(s, 240, 255))
+            rec(fillIds[2], (picks.allSatisfy { $0 } && plainPress && same && centreDark == [false, true, false, true, true] && apexSide) ? "pass" : "fail",
+                "menu picks=\(picks) plain press selected the shape tool=\(plainPress); drawn shapes (op, fill)=\(g) (expect ellipse:false, ellipse:true, rect:false, triangle:true, triangle:true); inside of each shape dark=\(centreDark) (expect false,true,false,true,true); triangle apex at the top: corner blank/base dark=\(apexSide)")
+        } else { rec(fillIds[2], "blocked", "a drag guard refused, a menu pick failed, or an export failed (picks=\(picks))") }
+
+        // Y4：実機のマウスで、図形のボタンを押し続ける
+        _ = selectTool(Seg.pen)
+        if let r = axRect(radios[Seg.shape]), hitOwner(CGPoint(x: r.midX, y: r.midY)) == pid {
             let c = CGPoint(x: r.midX, y: r.midY)
             func menuWindows() -> Int { infos(true).filter { owner($0) == pid && ($0[kCGWindowLayer as String] as? Int ?? 0) >= 100 }.count }
             let before = menuWindows()
             post(.mouseMoved, c); post(.leftMouseDown, c)
             let opened = wait(2.5) { menuWindows() > before }
             let duringHold = menuWindows()                // ボタンを押している間の、メニューのウィンドウの数
-            let itemsVisible = wait(2) { fillMenuItem("塗りつぶし") != nil && fillMenuItem("枠だけ") != nil }
+            let cells = ["rect", "ellipse", "triangle"].flatMap { s in [false, true].map { shapeCell(s, fill: $0) } }
+            let cellsVisible = wait(2) { ["rect", "ellipse", "triangle"].allSatisfy { s in shapeCell(s, fill: false) != nil && shapeCell(s, fill: true) != nil } }
             post(.leftMouseUp, c); usleep(300_000)
-            let stillOpen = menuWindows() > before        // ボタンを離しても、メニューは開いたまま（項目を選べる）
+            let stillOpen = menuWindows() > before        // ボタンを離しても、メニューは開いたまま（マスを選べる）
             key(53, [])                                   // Esc でメニューを閉じる
             let closed = wait(2) { menuWindows() == before }
-            rec(fillIds[3], (opened && itemsVisible && stillOpen && closed) ? "pass" : "fail", "menu windows before=\(before), while holding=\(duringHold) (opened=\(opened)), both menu items in AX=\(itemsVisible), still open after the button was released=\(stillOpen), closed by Esc=\(closed)")
+            rec(fillIds[3], (opened && cellsVisible && stillOpen && closed) ? "pass" : "fail", "menu windows before=\(before), while holding=\(duringHold) (opened=\(opened)), 2x3 cells in AX=\(cellsVisible) (first look found \(cells.compactMap { $0 }.count) of 6), still open after the button was released=\(stillOpen), closed by Esc=\(closed)")
             _ = selectTool(Seg.pen)
-        } else { rec(fillIds[3], "blocked", "the ellipse button position / pointer guard") }
+        } else { rec(fillIds[3], "blocked", "the shape button position / pointer guard") }
     } else { rec(fillIds[2], "blocked", "tool select failed"); rec(fillIds[3], "blocked", "tool select failed") }
 }
 
@@ -1352,7 +1365,7 @@ do {
         for id in resizeIds { rec(id, "blocked", "draw image failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in resizeIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 6, selectTool(Seg.move) {
+    } else if radios.count == 5, selectTool(Seg.move) {
         let original = imageBox()!
         let exportBefore = agentExportRep().flatMap { FileManager.default.contents(atPath: $0.path) }
         let selected = click(pt(200, 150))
@@ -1402,7 +1415,7 @@ do {
         for id in shapeIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in shapeIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 6, selectTool(Seg.move) {
+    } else if radios.count == 5, selectTool(Seg.move) {
         // H4：四角（x=100, y=100, 200×100）。右下の取っ手（300, 200）を、(360, 220) へ
         let selected = click(pt(200, 150))
         let dragged = drag(line(pt(300, 200), pt(360, 220)), pid: pid)
@@ -1466,7 +1479,7 @@ do {
         for id in rotIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in rotIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 6, selectTool(Seg.move) {
+    } else if radios.count == 5, selectTool(Seg.move) {
         // H7：四角（中心 (200,150)）。回転の取っ手は、上辺の中央の 24 pt 上＝(200, 76)。右へ（時計回りに 90°）
         let selected = click(pt(200, 150))
         let rotated = drag(line(pt(200, 76), pt(300, 150)), pid: pid)
@@ -1566,7 +1579,7 @@ do {
     _ = runCLI(["clear"])
     if keyGuard(pid, app) != nil {
         rec(arrowIds[1], "blocked", "keyboard guard"); rec(arrowIds[2], "blocked", "keyboard guard")
-    } else if radios.count == 6, selectTool(Seg.pen) {
+    } else if radios.count == 5, selectTool(Seg.pen) {
         let picked = chooseLine("矢印")
         let toolIsLine = wait(2) { (ax(radios[Seg.line], "AXValue") as? NSNumber)?.intValue == 1 }
         usleep(400_000)   // メニューが閉じ切るのを待つ（閉じ切る前の最初のクリックは、メニューを閉じるだけになる）
@@ -1613,7 +1626,7 @@ do {
         return Double(p.x)
     }
     func menuItem(_ title: String) -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXMenuItem" && axs($0, "AXTitle") == title }.first }
-    if keyGuard(pid, app) != nil || radios.count != 6 || !selectTool(Seg.pen) {
+    if keyGuard(pid, app) != nil || radios.count != 5 || !selectTool(Seg.pen) {
         rec(id, "blocked", "keyboard guard or tool select failed")
     } else if let before = xOf(radios[Seg.move]) {
         AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
@@ -1654,7 +1667,7 @@ do {
         for id in marqueeIds { rec(id, "blocked", "draw failed: exit=\(drawn.0) \(drawn.2)") }
     } else if keyGuard(pid, app) != nil {
         for id in marqueeIds { rec(id, "blocked", "keyboard guard") }
-    } else if radios.count == 6, selectTool(Seg.move) {
+    } else if radios.count == 5, selectTool(Seg.move) {
         // MQ1：何もない所 (10,10) から (200,100) へ。A（40）と B（140）が入り、C（300,200）は入らない
         let marquee = drag(line(pt(10, 10), pt(200, 100)), pid: pid)
         let afterMarquee = xs()

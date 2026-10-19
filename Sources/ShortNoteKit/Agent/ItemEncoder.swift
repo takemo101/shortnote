@@ -19,8 +19,12 @@ enum ItemEncoder {
             out["color"] = hex(item.color)
             out["size"] = number(item.size)
             out["arrow"] = item.arrow.rawValue
-        case .ellipse(let rect), .rect(let rect):
-            if case .ellipse = item.content { out["op"] = "ellipse" } else { out["op"] = "rect" }
+        case .ellipse(let rect), .rect(let rect), .triangle(let rect):
+            switch item.content {
+            case .ellipse: out["op"] = "ellipse"
+            case .triangle: out["op"] = "triangle"
+            default: out["op"] = "rect"
+            }
             out["x"] = number(rect.minX); out["y"] = number(rect.minY)
             out["w"] = number(rect.width); out["h"] = number(rect.height)
             out["color"] = hex(item.color)

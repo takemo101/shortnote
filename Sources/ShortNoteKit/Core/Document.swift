@@ -128,6 +128,8 @@ struct Document {
             return ItemHandles.Target(kind: .ellipse, shape: .box(rect, rotation: item.rotation), keepsAspect: false, minSide: ItemHandles.shapeMinSide)
         case .rect(let rect):
             return ItemHandles.Target(kind: .rect, shape: .box(rect, rotation: item.rotation), keepsAspect: false, minSide: ItemHandles.shapeMinSide)
+        case .triangle(let rect):
+            return ItemHandles.Target(kind: .triangle, shape: .box(rect, rotation: item.rotation), keepsAspect: false, minSide: ItemHandles.shapeMinSide)
         case .text(_, let box):
             return ItemHandles.Target(kind: .text, shape: .box(box, rotation: item.rotation), keepsAspect: true, minSide: ItemHandles.shapeMinSide)
         case .line(let from, let to):
@@ -155,6 +157,8 @@ struct Document {
             copy.items[index].content = .ellipse(box); copy.items[index].rotation = angle
         case (.rect, .box(let box, let angle)):
             copy.items[index].content = .rect(box); copy.items[index].rotation = angle
+        case (.triangle, .box(let box, let angle)):
+            copy.items[index].content = .triangle(box); copy.items[index].rotation = angle
         case (.text(let text, _), .box(let box, let angle)):
             copy.items[index].content = .text(text, box: box); copy.items[index].rotation = angle
             if let fontSize { copy.items[index].size = fontSize }
@@ -176,7 +180,7 @@ struct Document {
             copy.items[index].content = .pen(points: points.map { StrokePoint(point: ItemHandles.rotate($0.point, about: center, by: angle), pressure: $0.pressure) })
         case .line(let from, let to):
             copy.items[index].content = .line(from: ItemHandles.rotate(from, about: center, by: angle), to: ItemHandles.rotate(to, about: center, by: angle))
-        case .ellipse, .rect, .text, .image:
+        case .ellipse, .rect, .triangle, .text, .image:
             copy.items[index].rotation = ItemHandles.normalized(items[index].rotation + angle)
         }
         return copy

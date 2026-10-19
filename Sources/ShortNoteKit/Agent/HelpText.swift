@@ -25,7 +25,7 @@ enum HelpText {
 
     Run `snote help <command>` for a command's details. Without arguments, `snote` starts the app.
     Operations JSON: {"version":1,"ops":[{"op":"rect","x":40,"y":60,"w":200,"h":80,"color":"#ff0000"}, ...]}
-    ops: pen, line, ellipse, rect, text, image. Coordinates are canvas points (origin top-left; 1 pt = 2 px in exported PNGs).
+    ops: pen, line, ellipse, rect, triangle, text, image. Coordinates are canvas points (origin top-left; 1 pt = 2 px in exported PNGs).
 
     Exit codes: 0 ok, 1 invalid ops JSON (nothing applied), 2 usage, 3 cannot reach the app, 4 file I/O.
     Errors are one JSON line on stderr: {"error":{"code","message","op"?}}. Success is one JSON line on stdout.

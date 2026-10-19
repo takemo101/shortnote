@@ -28,6 +28,7 @@ enum Op: Equatable {
     case line(from: CGPoint, to: CGPoint, color: RGBA, size: CGFloat, arrow: Item.Arrow = .none)
     case ellipse(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
     case rect(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
+    case triangle(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
     case text(String, at: CGPoint, color: RGBA, fontSize: CGFloat, rotate: Double = 0)
     case image(path: String, at: CGPoint, width: CGFloat?, height: CGFloat?, rotate: Double = 0)
 }
@@ -88,7 +89,7 @@ enum OpsParser {
                 let from = try fields.point(dict["from"], "from"), to = try fields.point(dict["to"], "to")
                 guard hypot(to.x - from.x, to.y - from.y) >= 1 else { throw fields.fail("直線の始点と終点が近すぎます（1 pt 以上離してください）") }
                 return .success(.line(from: from, to: to, color: try fields.color(), size: try fields.size(), arrow: try fields.arrow()))
-            case "ellipse", "rect":
+            case "ellipse", "rect", "triangle":
                 try fields.allow(["op", "x", "y", "w", "h", "color", "size", "fill", "rotate"])
                 let rect = try fields.box(requireSize: true)
                 let color = try fields.color(), size = try fields.size()
@@ -99,7 +100,11 @@ enum OpsParser {
                     fill = flag.boolValue
                 }
                 let rotate = try fields.rotate()
-                return .success(name == "rect" ? .rect(rect: rect, color: color, size: size, fill: fill, rotate: rotate) : .ellipse(rect: rect, color: color, size: size, fill: fill, rotate: rotate))
+                switch name {
+                case "rect": return .success(.rect(rect: rect, color: color, size: size, fill: fill, rotate: rotate))
+                case "triangle": return .success(.triangle(rect: rect, color: color, size: size, fill: fill, rotate: rotate))
+                default: return .success(.ellipse(rect: rect, color: color, size: size, fill: fill, rotate: rotate))
+                }
             case "text":
                 try fields.allow(["op", "x", "y", "text", "color", "fontSize", "rotate"])
                 guard let text = dict["text"] as? String else { throw fields.fail("`text` は、文字列でなければなりません") }
@@ -115,7 +120,7 @@ enum OpsParser {
                 let w = try fields.optionalSide("w"), h = try fields.optionalSide("h")
                 return .success(.image(path: path, at: at, width: w, height: h, rotate: try fields.rotate()))
             default:
-                throw fields.fail("知らない `op` です：\(name)（pen・line・ellipse・rect・text・image のどれか）")
+                throw fields.fail("知らない `op` です：\(name)（pen・line・ellipse・rect・triangle・text・image のどれか）")
             }
         } catch let error as AgentError {
             return .failure(error)

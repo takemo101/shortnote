@@ -55,7 +55,7 @@ struct LineToolTests {
         #expect(grabbable)
     }
 
-    @Test("ツールのキーは、直線が 6。1〜5 は、これまでどおり")
+    @Test("ツールのキーは、直線が 6、三角が 7。1〜5 は、これまでどおり")
     func defaultKeys() {
         let b = KeyBindings()
         func command(_ code: UInt16, _ label: String) -> Command? { b.command(for: KeyChord(keyCode: code, label: label), whileEditingText: false) }
@@ -65,12 +65,13 @@ struct LineToolTests {
         #expect(command(21, "4") == .toolText)
         #expect(command(23, "5") == .toolMove)
         #expect(command(22, "6") == .toolLine)
-        #expect(Command.toolLine.group == .tool)
+        #expect(command(26, "7") == .toolTriangle)
+        #expect(Command.toolLine.group == .tool && Command.toolTriangle.group == .tool)
     }
 
-    @Test("ツールバーの並びは、ペン／直線／円／四角／文字／移動。直線はペンの隣（2 番目）")
+    @Test("ツールバーの並びは、ペン／直線／図形（円・四角・三角）／文字／移動。直線はペンの隣（2 番目）")
     func toolSegmentOrder() {
-        #expect(Tool.allCases == [.pen, .line, .ellipse, .rect, .text, .move])
-        #expect(Tool.line.rawValue == 1)
+        #expect(Tool.allCases == [.pen, .line, .ellipse, .rect, .triangle, .text, .move])
+        #expect([Tool.pen, .line, .ellipse, .rect, .triangle, .text, .move].map(Toolbar.segment(for:)) == [0, 1, 2, 2, 2, 3, 4])
     }
 }
