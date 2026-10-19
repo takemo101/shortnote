@@ -235,20 +235,26 @@ struct ShapeRecognizerReviewTests {
 
     @Test("水平・垂直に近い四角は、6° 以内なら、水平に直す（5° でも、直る）。直したあとの枠は、水平の枠で計る")
     func snapsNearlyLevelRectangles() throws {
-        for degrees in [-5.5, -3.0, 2.0, 5.0] as [CGFloat] {
-            let a = degrees * .pi / 180, center = pt(200, 150)
-            let corners = [pt(-100, -50), pt(100, -50), pt(100, 50), pt(-100, 50), pt(-100, -38)].map { p in
-                pt(center.x + p.x * cos(a) - p.y * sin(a), center.y + p.x * sin(a) + p.y * cos(a))
+        /// 中心 (200,150)、200×100 の四角を、`degrees` 回した、閉じた線の角（式を分けて書く：CI のコンパイラが、1 つの式では、型を決められなかった）。
+        func corners(rotatedBy degrees: CGFloat) -> [CGPoint] {
+            let a: CGFloat = degrees * .pi / 180
+            let c: CGFloat = cos(a), s: CGFloat = sin(a)
+            let local: [CGPoint] = [pt(-100, -50), pt(100, -50), pt(100, 50), pt(-100, 50), pt(-100, -38)]
+            return local.map { (p: CGPoint) -> CGPoint in
+                let x: CGFloat = 200 + p.x * c - p.y * s
+                let y: CGFloat = 150 + p.x * s + p.y * c
+                return pt(x, y)
             }
-            let shape = try #require(ShapeRecognizer.recognize(stroke(through: corners, perEdge: 26, wobble: 0.3)))
+        }
+        for degrees in [-5.5, -3.0, 2.0, 5.0] as [CGFloat] {
+            let shape = try #require(ShapeRecognizer.recognize(stroke(through: corners(rotatedBy: degrees), perEdge: 26, wobble: 0.3)))
             guard case .rect(_, let rotation) = shape else { Issue.record("四角でない：\(shape)（\(degrees)°）"); continue }
             #expect(rotation == 0, "\(degrees)° の四角が、\(rotation * 180 / .pi)° のまま")
         }
         // 10° は、直さない
-        let a = 10 * CGFloat.pi / 180
-        let tilted = [pt(-100, -50), pt(100, -50), pt(100, 50), pt(-100, 50), pt(-100, -38)].map { pt(200 + $0.x * cos(a) - $0.y * sin(a), 150 + $0.x * sin(a) + $0.y * cos(a)) }
-        guard case .rect(_, let rotation)? = ShapeRecognizer.recognize(stroke(through: tilted, perEdge: 26, wobble: 0.3)) else { Issue.record("四角でない"); return }
-        #expect(abs(rotation - a) < 3 * .pi / 180)
+        let tilt: CGFloat = 10 * .pi / 180
+        guard case .rect(_, let rotation)? = ShapeRecognizer.recognize(stroke(through: corners(rotatedBy: 10), perEdge: 26, wobble: 0.3)) else { Issue.record("四角でない"); return }
+        #expect(abs(rotation - tilt) < 3 * .pi / 180)
     }
 
     @Test("ほぼ円は、傾けない（回転 0）。細長い楕円の傾きは、保つ")

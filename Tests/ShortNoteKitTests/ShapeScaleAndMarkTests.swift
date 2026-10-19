@@ -216,7 +216,7 @@ struct ShapeScaleAndMarkTests {
     func barColoursFollowTheAppearance() throws {
         let bar = ViewControlsView(frame: NSRect(x: 0, y: 0, width: 100, height: 24))
         func background(_ appearance: NSAppearance.Name) throws -> CGColor {
-            bar.appearance = try #require(NSAppearance(named: appearance))
+            bar.appearance = NSAppearance(named: appearance)
             bar.effectiveAppearance.performAsCurrentDrawingAppearance { bar.updateLayer() }
             return try #require(bar.layer?.backgroundColor)
         }
