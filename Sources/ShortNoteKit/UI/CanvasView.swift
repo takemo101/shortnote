@@ -18,6 +18,8 @@ final class CanvasView: NSView {
             marquee = nil   // 範囲選択の途中で、ツールを替えたら、捨てる
             panStart = nil  // ハンドのドラッグの途中で、ツールを替えたら、止める
             eraserMarks = []; eraserLast = nil   // 消しゴムの途中で、ツールを替えたら、何も消さない
+            if snapBase != nil { draft = nil }   // 整形した図形を、回している途中で、ツールを替えたら、その図形は、捨てる（ほかのツールの描き方で、図形が崩れないように）
+            stopHold()                            // 整形の待ちも、同じ
             window?.invalidateCursorRects(for: self)
         }
     }
@@ -65,6 +67,15 @@ final class CanvasView: NSView {
     private var eraserLast: CGPoint?
     /// 消しゴムの、ポインタの半径（画面の pt。拡大縮小していても、同じ）。
     static let eraserRadius: CGFloat = 8
+    /// 手書きの形の整形（SPEC §3.2.7）：止まりの待ちのタイマーと、その基準の位置。整形したあとは、元の図形と、掴んだ位置の向き（回すときの基準）。
+    private var holdTimer: Timer?
+    private var holdAnchor: CGPoint?
+    private var snapBase: (shape: RecognizedShape, startAngle: CGFloat)?
+    /// 待ちの基準にした点が、描いている線の、何番目か（止めている間に付いた、手の震えの点を、判定から外すため）。
+    private var holdAnchorIndex = 0
+    /// ポインタを止めたとみなす待ち時間（秒）と、動いていないとみなす距離（画面の pt）。
+    static let holdDelay: TimeInterval = 0.6
+    static let holdRadius: CGFloat = 3
     /// 移動ツールで、動かしている要素の番号と、動かし始める前の文書。
     private var move: (index: Int, base: Document)?
     /// 移動ツールで選ばれている要素の番号（小さい順。背景画像以外の、どの要素も選べる。範囲選択で複数になる）。保存しない。SPEC §3.2.3。
@@ -236,6 +247,7 @@ final class CanvasView: NSView {
         resizing = nil
         eraserMarks = []
         eraserLast = nil
+        stopHold()
     }
 
     // MARK: - エージェントの操作（SPEC §3.7）
@@ -358,6 +370,7 @@ final class CanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         commitEditing()
         marquee = nil       // 前の範囲選択が、離す操作を受けずに残っていたら、捨てる（次のドラッグを、乗っ取らないように）
+        stopHold()          // 整形の待ちも、同じ
         eraserMarks = []; eraserLast = nil   // 消しゴムも、同じ（離す操作が届かなかったとき、印のついた要素を、次のドラッグで、消さないように）
         panStart = nil      // ハンドのドラッグも、同じ（離す操作が届かなかったとき、次のドラッグが、すべてパンにならないように）
         let p = location(event)
@@ -365,6 +378,7 @@ final class CanvasView: NSView {
         switch tool {
         case .pen:
             draft = Item(content: .pen(points: [StrokePoint(point: p, pressure: pressure(event))]), color: color.cgColor, size: brushSize)
+            scheduleHold(at: convert(event.locationInWindow, from: nil))
         case .ellipse:
             draft = Item(content: .ellipse(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillEllipse)
         case .rect:
@@ -472,11 +486,24 @@ final class CanvasView: NSView {
             needsDisplay = true
             return
         }
+        if let snap = snapBase, let current = draft {
+            // 整形したあと：ポインタの向きの変化の分だけ、図形を回す（掴んだ位置からの差）。掴める範囲が、キャンバスの中にほとんど残らなくなる向きへは、回さない（移動ツールの回転と同じ規則。直前の向きのまま）
+            let delta = ItemHandles.normalized(ItemHandles.angle(from: snap.shape.pivot, to: p) - snap.startAngle)
+            let turned = snap.shape.rotated(by: delta).item(color: current.color, size: current.size)
+            let before = document.appending(current), after = document.appending(turned)
+            guard after.keepsGrabArea(at: after.items.count - 1, since: before, in: canvasRect) else { return }
+            draft = turned
+            needsDisplay = true
+            return
+        }
         guard let item = draft else { return }
         switch item.content {
         case .pen(var points):
             points.append(StrokePoint(point: p, pressure: pressure(event)))
             draft?.content = .pen(points: points)
+            // 動いた（画面で 3 pt を超えて。キャンバスの外の位置で比べる：縁に丸めた位置では、外で動かし続けても、止まったことになる）：待ち直す
+            let raw = convert(event.locationInWindow, from: nil)
+            if let anchor = holdAnchor, hypot(raw.x - anchor.x, raw.y - anchor.y) > Self.holdRadius * viewport.scale { scheduleHold(at: raw) }
         case .ellipse:
             draft?.content = .ellipse(dragRect(to: p))
         case .rect:
@@ -492,6 +519,7 @@ final class CanvasView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        stopHold()   // 整形した図形（`draft`）は、そのまま確定する（下の draft の確定）
         if eraserLast != nil {
             finishErasing()
             return
@@ -534,6 +562,39 @@ final class CanvasView: NSView {
             break
         }
         commit(document.appending(item))
+    }
+
+    // MARK: - 手書きの形の整形（SPEC §3.2.7）
+
+    /// ペンで、動かさずに待つ：その位置を基準に、待ち直す。
+    private func scheduleHold(at p: CGPoint) {
+        holdTimer?.invalidate()
+        holdAnchor = p
+        if case .pen(let points)? = draft?.content { holdAnchorIndex = max(points.count - 1, 0) }
+        guard tool == .pen, snapBase == nil else { holdTimer = nil; return }
+        let timer = Timer(timeInterval: Self.holdDelay, repeats: false) { [weak self] _ in self?.snapHeldStroke() }
+        RunLoop.main.add(timer, forMode: .common)
+        holdTimer = timer
+    }
+
+    private func stopHold() {
+        holdTimer?.invalidate()
+        holdTimer = nil
+        holdAnchor = nil
+        snapBase = nil
+    }
+
+    /// 止めたまま、待ち時間がたった：いま描いている線を、円・四角・三角・直線・矢印に見えれば、その図形に置き替える（見えなければ、何もしない）。
+    /// 置き替えたあと、ボタンを押したまま動かすと、図形が回る。
+    func snapHeldStroke() {
+        holdTimer = nil
+        // 止めている間に付いた、手の震えの点（基準の点より後）は、形の判定から外す（線が、伸びて、直線に見えなくなるため）
+        guard tool == .pen, snapBase == nil, let current = draft, case .pen(let points) = current.content, points.count >= 4, let last = points.last?.point,
+              let shape = ShapeRecognizer.recognize(points.prefix(holdAnchorIndex + 1).map(\.point)) else { return }
+        draft = shape.item(color: current.color, size: current.size)
+        snapBase = (shape, ItemHandles.angle(from: shape.pivot, to: last))
+        NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)   // 触覚（トラックパッドがあれば）
+        needsDisplay = true
     }
 
     // MARK: - 消しゴム（SPEC §3.2.6）
