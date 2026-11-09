@@ -130,6 +130,9 @@ final class CanvasView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel("キャンバス")
+        // 拡大・移動したとき、キャンバスの内容が、ビューの外（ツールバー）へ描かれないようにする。
+        // macOS 14 の SDK でビルドしたアプリは、既定で描画がビューの外へ出る（13 までは、既定で収まる）。
+        clipsToBounds = true
     }
 
     required init?(coder: NSCoder) { fatalError("not supported") }
