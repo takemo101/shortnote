@@ -1,28 +1,49 @@
 import AppKit
 
-/// ここからドラッグすると PNG のファイルパスがエージェントの入力欄に渡る。
+/// ここからドラッグすると PNG のファイルパスがエージェントの入力欄に渡る。パレットの中の、枠のないボタンの見た目（ポインタが乗ると、淡い面）。
 final class DragHandleView: NSView, NSDraggingSource {
     /// ドラッグ開始時に最新の PNG を書き出して URL を返す。
     var fileProvider: (() -> URL?)?
     private var dragStarted = false
+    private var hovering = false { didSet { if oldValue != hovering { needsDisplay = true } } }
 
-    override var intrinsicContentSize: NSSize { NSSize(width: 150, height: 28) }
+    override var intrinsicContentSize: NSSize { NSSize(width: 124, height: 30) }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let box = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: 6, yRadius: 6)
-        NSColor.separatorColor.setStroke()
-        box.stroke()
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        toolTip = "ここから、エージェントの入力欄などへドラッグすると、書き出した画像のパスが渡る"
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        setAccessibilityLabel("ドラッグで渡す")
+    }
 
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        for area in trackingAreas where area.owner === self { removeTrackingArea(area) }   // 自分の領域だけ（ツールチップの領域〔`NSToolTipManager`〕を消さない）
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+
+    override func mouseEntered(with event: NSEvent) { hovering = true }
+    override func mouseExited(with event: NSEvent) { hovering = false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if hovering {
+            NSColor.labelColor.withAlphaComponent(0.08).setFill()
+            NSBezierPath(roundedRect: bounds, xRadius: 8, yRadius: 8).fill()
+        }
         let label = NSAttributedString(
             string: "ドラッグで渡す",
             attributes: [
                 .font: NSFont.systemFont(ofSize: 12),
-                .foregroundColor: NSColor.labelColor,
+                .foregroundColor: NSColor.labelColor.withAlphaComponent(0.82),
             ]
         )
         let icon = NSImage(systemSymbolName: "arrow.up.doc", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(paletteColors: [.labelColor]))
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular).applying(.init(paletteColors: [NSColor.labelColor.withAlphaComponent(0.82)])))
         let iconW: CGFloat = icon?.size.width ?? 0
         let gap: CGFloat = icon == nil ? 0 : 6
         let total = iconW + gap + label.size().width

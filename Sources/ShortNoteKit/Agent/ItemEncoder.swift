@@ -43,6 +43,12 @@ enum ItemEncoder {
             out["x"] = number(box.minX); out["y"] = number(box.minY)
             out["w"] = number(box.width); out["h"] = number(box.height)
             out["rotate"] = degrees(item.rotation)
+        case .number(let box):
+            out["op"] = "number"
+            out["x"] = number(box.midX); out["y"] = number(box.midY)
+            out["d"] = number(min(box.width, box.height))
+            out["color"] = hex(item.color)
+            out["rotate"] = degrees(item.rotation)
         }
         return out
     }

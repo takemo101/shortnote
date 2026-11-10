@@ -12,6 +12,20 @@ final class PaintWindowController: NSObject {
     private let center: ShortcutCenter
     private lazy var sizing = CanvasSizing(panel: panel, canvas: canvas)
     private var positioned = false
+    private let root = NSView()
+    private let orientationStore = PaletteOrientationStore()
+    /// ツールのパレットの置き場所ごとの配置（どれか 1 つだけが有効）と、縁に沿った位置の制約（定数は、`base` ＋ 位置）。
+    private var layouts: [PaletteOrientation: [NSLayoutConstraint]] = [:]
+    private var offsetConstraints: [PaletteOrientation: (constraint: NSLayoutConstraint, base: CGFloat)] = [:]
+    private var orientation: PaletteOrientation = .top
+    private let dropHint = DropHintView()
+    /// ドラッグで、パレットを持った所（パレットの始まりからの距離）と、ドラッグを始めたときの置き場所。
+    private var grab: CGFloat = 0
+    private var dragStartOrientation: PaletteOrientation = .top
+    /// 別の縁へ移すときに、持った所として数える、始まりからの最大の距離（つまみの近く）。
+    private static let maxGrab: CGFloat = 30
+    /// 窓の左右の余白。
+    private static let side: CGFloat = 12
 
     /// ブラシを `brushSmaller`／`brushLarger` で動かす 1 回あたりの幅。
     private static let brushStep: CGFloat = 2
@@ -36,6 +50,9 @@ final class PaintWindowController: NSObject {
 
     private func buildUI() {
         panel.title = "ShortNote"
+        panel.titleVisibility = .hidden   // 名前は、タイトルバーに出さない（`title` は、そのまま持つ）
+        panel.titlebarAppearsTransparent = true
+        panel.backgroundColor = .underPageBackgroundColor   // キャンバスのまわりの余白は、ビューの外側（§3.2.5）と同じ、暗い色
         panel.isFloatingPanel = true
         panel.level = .floating
         panel.hidesOnDeactivate = false
@@ -74,28 +91,74 @@ final class PaintWindowController: NSObject {
         toolbar.onClear = { [weak self] in self?.perform(.clearCanvas) }
         toolbar.fileProvider = { [weak self] in self?.exportFile() }
 
-        // キャンバスだけが、ウィンドウの大きさに合わせて伸び縮みする（上下の帯は固定の高さ）。
-        let top = toolbar.topRow, bottom = toolbar.bottomRow
-        let root = NSView()
-        for v in [top, canvas, bottom] {
+        // 窓の背景（暗い色）に、パレットが浮かぶ：ツールのパレット、キャンバス、下の 2 つのパレット。キャンバスの上には重ねない（SPEC §4）。
+        // ツールのパレットは、キャンバスの上（横並び）・左（縦並び）・右（縦並び）。ドラッグで動かせる。3 つの配置を作っておき、置き場所に合う 1 つだけを有効にする。
+        let top = toolbar.topPill, output = toolbar.outputPill, actions = toolbar.actionsPill
+        for v in [top, canvas, output, actions] {
             v.translatesAutoresizingMaskIntoConstraints = false
             root.addSubview(v)
         }
-        let side: CGFloat = 12, gap: CGFloat = 8
+        let side = Self.side, gap: CGFloat = 8
         NSLayoutConstraint.activate([
-            top.topAnchor.constraint(equalTo: root.topAnchor, constant: 10),
-            top.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
-            top.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -side),
-
-            canvas.topAnchor.constraint(equalTo: top.bottomAnchor, constant: gap),
-            canvas.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
-            canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
-
-            bottom.topAnchor.constraint(equalTo: canvas.bottomAnchor, constant: gap),
-            bottom.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
-            bottom.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
-            bottom.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -12),
+            output.topAnchor.constraint(equalTo: canvas.bottomAnchor, constant: gap),
+            output.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -side),
+            actions.topAnchor.constraint(equalTo: canvas.bottomAnchor, constant: gap),
+            actions.leadingAnchor.constraint(greaterThanOrEqualTo: output.trailingAnchor, constant: gap),
         ])
+        /// 縁に沿った位置の制約：窓が狭いときは、縮められる（優先度を下げる）。縁の内側に収める制約は、別に、必須で置く。
+        func along(_ constraint: NSLayoutConstraint, base: CGFloat, _ orientation: PaletteOrientation) -> NSLayoutConstraint {
+            constraint.priority = NSLayoutConstraint.Priority(rawValue: NSLayoutConstraint.Priority.fittingSizeCompression.rawValue - 1)   // ウィンドウの大きさ・最小の大きさの計算に入れない（位置が、窓を広げない）
+            offsetConstraints[orientation] = (constraint, base)
+            return constraint
+        }
+        layouts = [
+            .top: [
+                top.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+                top.leadingAnchor.constraint(greaterThanOrEqualTo: root.leadingAnchor, constant: side),
+                along(top.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side), base: side, .top),
+                top.trailingAnchor.constraint(lessThanOrEqualTo: root.trailingAnchor, constant: -side),
+                canvas.topAnchor.constraint(equalTo: top.bottomAnchor, constant: gap),
+                canvas.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+                canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+                output.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+                actions.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+            ],
+            .left: [
+                top.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+                top.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: 4),
+                along(top.topAnchor.constraint(equalTo: root.topAnchor, constant: 4), base: 4, .left),
+                top.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -side),
+                canvas.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+                canvas.leadingAnchor.constraint(equalTo: top.trailingAnchor, constant: gap),
+                canvas.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+                output.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+                actions.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+            ],
+            .right: [
+                top.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -side),
+                top.topAnchor.constraint(greaterThanOrEqualTo: root.topAnchor, constant: 4),
+                along(top.topAnchor.constraint(equalTo: root.topAnchor, constant: 4), base: 4, .right),
+                top.bottomAnchor.constraint(lessThanOrEqualTo: root.bottomAnchor, constant: -side),
+                canvas.topAnchor.constraint(equalTo: root.topAnchor, constant: 4),
+                canvas.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: side),
+                canvas.trailingAnchor.constraint(equalTo: top.leadingAnchor, constant: -gap),
+                output.leadingAnchor.constraint(equalTo: canvas.leadingAnchor),
+                actions.trailingAnchor.constraint(equalTo: canvas.trailingAnchor),
+            ],
+        ]
+        let saved = orientationStore.load()
+        activateLayout(for: saved)
+        applyOffset(orientationStore.loadOffset(), for: saved)
+        toolbar.onPaletteDrag = { [weak self] phase, point in self?.paletteDrag(phase, at: point) }
+
+        // ドラッグ中の、くっつく先の目印。レイアウトには入れず（枠を、直接決める）、ふだんは隠す。
+        dropHint.wantsLayer = true
+        dropHint.layer?.zPosition = 1   // キャンバスの上、パレットの下
+        dropHint.layer?.cornerRadius = FloatingPill.cornerRadius
+        dropHint.layer?.borderWidth = 1.5
+        dropHint.isHidden = true
+        root.addSubview(dropHint)
+        dropHint.setAccessibilityElement(false)
 
         // ビューの帯（倍率の表示・戻す。SPEC §3.2.5）：キャンバスの左下に重ねる。ビューが等倍・移動なしのときは、隠れている
         viewControls.translatesAutoresizingMaskIntoConstraints = false
@@ -112,6 +175,84 @@ final class PaintWindowController: NSObject {
         let fitting = root.fittingSize
         panel.setContentSize(fitting)
         panel.contentMinSize = fitting
+    }
+
+    /// ツールのパレットの置き場所に合う配置だけを有効にする（大きさは、呼び出し側が合わせる）。
+    private func activateLayout(for orientation: PaletteOrientation) {
+        for (other, constraints) in layouts where other != orientation { NSLayoutConstraint.deactivate(constraints) }
+        self.orientation = orientation
+        toolbar.orientation = orientation
+        NSLayoutConstraint.activate(layouts[orientation] ?? [])
+    }
+
+    /// パレットの置き場所を替える（SPEC §4）。キャンバスの大きさは変えず、ウィンドウを、パレットの分だけ広げる・狭める。
+    private func changeOrientation(to orientation: PaletteOrientation) {
+        let canvasSize = canvas.canvasSize
+        activateLayout(for: orientation)
+        let fitting = root.fittingSize   // キャンバスが最小（480×320）のときの、内容の大きさ
+        let chrome = CGSize(width: fitting.width - CanvasView.minimumSize.width, height: fitting.height - CanvasView.minimumSize.height)
+        panel.contentMinSize = fitting
+        sizing.setContentSize(CGSize(width: canvasSize.width + chrome.width, height: canvasSize.height + chrome.height))
+    }
+
+    /// 縁に沿った位置（縁の端からの距離）を、置き場所の配置に入れる。
+    private func applyOffset(_ offset: CGFloat, for orientation: PaletteOrientation) {
+        guard let entry = offsetConstraints[orientation] else { return }
+        entry.constraint.constant = entry.base + offset
+    }
+
+    // MARK: - パレットのドラッグ（SPEC §4）
+
+    /// ドラッグ中の、くっつく先の目印（その縁に、淡い色の帯）。
+    private func paletteDrag(_ phase: FloatingPill.DragPhase, at point: NSPoint) {
+        let size = root.bounds.size
+        let pointer = CGPoint(x: point.x, y: size.height - point.y)   // 左上が原点
+        if phase == .began {
+            // パレットを持った所（パレットの始まりから）。離すとき、その所が、ポインタの下に来るようにする（持った所が、ずれない）
+            let pill = toolbar.topPill.frame
+            let along = orientation.isVertical ? pointer.y - (size.height - pill.maxY) : pointer.x - pill.minX
+            grab = max(along, 0)
+            dragStartOrientation = orientation
+        }
+        let zone = PaletteDock.orientation(forPointer: pointer, in: size, current: orientation)
+        switch phase {
+        case .began, .moved:
+            showDropHint(zone, in: size)
+        case .ended:
+            dropHint.isHidden = true
+            dropPalette(at: zone, pointer: pointer)
+        }
+    }
+
+    private func showDropHint(_ zone: PaletteOrientation, in size: CGSize) {
+        let thickness: CGFloat = zone.isVertical ? 60 : 44
+        let frame: NSRect
+        switch zone {
+        case .top: frame = NSRect(x: Self.side, y: size.height - 4 - thickness, width: size.width - 2 * Self.side, height: thickness)
+        case .left: frame = NSRect(x: Self.side, y: Self.side, width: thickness, height: size.height - 4 - Self.side)
+        case .right: frame = NSRect(x: size.width - Self.side - thickness, y: Self.side, width: thickness, height: size.height - 4 - Self.side)
+        }
+        dropHint.frame = frame
+        dropHint.isHidden = false
+    }
+
+    /// 離した所に近い縁へ、パレットをくっつける。縁に沿った位置は、持った所がポインタの下に来るようにする（縁の中に収める）。
+    /// 別の縁へ移すときは、持った所を、始まりの近く（`maxGrab` まで）に丸める（向きが替わると、パレットの長さ・形が違うため）。
+    /// 縁に沿った余りは、パレットのいちばん長い形（大きさの部品が出ているとき）で決める（あとで部品が出ても、ツールのボタンが動かないように）。
+    private func dropPalette(at zone: PaletteOrientation, pointer: CGPoint) {
+        let held = zone == dragStartOrientation ? grab : min(grab, Self.maxGrab)
+        if zone != orientation { changeOrientation(to: zone) }
+        root.layoutSubtreeIfNeeded()
+        let length = toolbar.longestPillLength
+        let size = root.bounds.size
+        let offset: CGFloat
+        if zone.isVertical {
+            offset = PaletteDock.offset(pointerAlongEdge: pointer.y, grab: held, palette: length, start: 4, track: size.height - 4 - Self.side)
+        } else {
+            offset = PaletteDock.offset(pointerAlongEdge: pointer.x, grab: held, palette: length, start: Self.side, track: size.width - 2 * Self.side)
+        }
+        applyOffset(offset, for: zone)
+        orientationStore.save(zone, offset: offset)
     }
 
     /// 割り当てが変わったとき、ツールチップを新しいキーに合わせる。
@@ -178,6 +319,7 @@ final class PaintWindowController: NSObject {
         case .toolTriangle: select(.triangle)
         case .toolHand: select(.hand)
         case .toolEraser: select(.eraser)
+        case .toolNumber: select(.number)
         case .viewReset: canvas.resetViewport()
         case .toolText: select(.text)
         case .toolMove: select(.move)

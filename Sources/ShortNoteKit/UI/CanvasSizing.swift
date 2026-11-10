@@ -24,7 +24,16 @@ final class CanvasSizing {
         let target = size.points
         let current = canvas.canvasSize
         let old = panel.frame
-        let frameSize = CGSize(width: old.width + target.width - current.width, height: old.height + target.height - current.height)
+        place(frameSize: CGSize(width: old.width + target.width - current.width, height: old.height + target.height - current.height))
+    }
+
+    /// ウィンドウの内容の大きさを `size` にする（左上を動かさず、画面からはみ出す分は寄せる）。パレットの向きを替えるとき、キャンバスの大きさを保つため。
+    func setContentSize(_ size: CGSize) {
+        place(frameSize: panel.frameRect(forContentRect: NSRect(origin: .zero, size: size)).size)
+    }
+
+    private func place(frameSize: CGSize) {
+        let old = panel.frame
         let screen = screenFrame
         var origin = CGPoint(x: old.minX, y: old.maxY - frameSize.height)
         origin.x = min(max(origin.x, screen.minX), screen.maxX - frameSize.width)

@@ -133,12 +133,11 @@ struct FillUITests {
     @Test("ツールバー：図形のボタンに、2 列 × 3 行のメニュー（左が枠だけ、右が塗りつぶし。上から 四角・円・三角）。マスを選ぶと、通知・印・ツールの切り替えが起きる。選びは図形ごとに別々")
     func shapeMenu() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 7 })
-        #expect(control.menu(forSegment: Toolbar.segment(for: .pen)) == nil)
-        let shapeSegment = Toolbar.segment(for: .ellipse)
-        let menu = try #require(control.menu(forSegment: shapeSegment))
+        let pen = toolbar.button(for: .pen), shape = toolbar.button(for: .ellipse)
+        #expect(pen.menuProvider == nil)
+        let menu = try #require(shape.menuProvider?())
         let grid = try #require(menu.items.first?.view as? ShapeMenuView)
-        #expect(menu.items.count == 1 && control.showsMenuIndicator(forSegment: shapeSegment) && !control.showsMenuIndicator(forSegment: Toolbar.segment(for: .pen)))
+        #expect(menu.items.count == 1)
 
         func cell(_ id: String) throws -> NSButton {
             try #require(allSubviews(grid).compactMap { $0 as? NSButton }.first { $0.accessibilityIdentifier() == id })
@@ -150,33 +149,30 @@ struct FillUITests {
         #expect(frames[0].minX < frames[1].minX && frames[0].minY > frames[2].minY && frames[2].minY > frames[4].minY)
         // 起動のときは、枠だけの円に印
         #expect(try ids.filter { try cell($0).state == .on } == ["shape-ellipse-outline"])
-        let before = control.image(forSegment: shapeSegment)?.tiffRepresentation
+        let before = shape.image?.tiffRepresentation
 
         var fills: [String] = [], tools: [Tool] = []
         toolbar.onSelectFill = { fills.append("\($0)=\($1)") }
         toolbar.onSelectTool = { tools.append($0) }
-        control.selectedSegment = Toolbar.segment(for: .pen)
+        toolbar.show(tool: .pen)
 
         try cell("shape-triangle-fill").performClick(nil)           // 三角：塗りつぶし
-        #expect(fills == ["triangle=true"] && tools == [.triangle] && control.selectedSegment == shapeSegment)
+        #expect(fills == ["triangle=true"] && tools == [.triangle] && shape.isOn && !pen.isOn)
         #expect(try ids.filter { try cell($0).state == .on } == ["shape-triangle-fill"])
-        #expect(control.image(forSegment: shapeSegment)?.tiffRepresentation != before)   // ボタンの絵が、選びに合う
+        #expect(shape.image?.tiffRepresentation != before)   // ボタンの絵が、選びに合う
         try cell("shape-rect-outline").performClick(nil)            // 四角：枠だけ
         #expect(fills == ["triangle=true", "rect=false"] && tools == [.triangle, .rect])
 
         // ボタンを普通に押す：その図形（いま表している図形）のツールを選ぶだけで、描き方は、変えない
-        control.selectedSegment = Toolbar.segment(for: .pen)
-        control.sendAction(control.action, to: control.target)
-        #expect(tools.last == .pen)
-        control.selectedSegment = shapeSegment
-        control.sendAction(control.action, to: control.target)
-        #expect(tools.last == .rect && fills.count == 2)
+        pen.performClick(nil)
+        #expect(tools.last == .pen && !shape.isOn)
+        shape.performClick(nil)
+        #expect(tools.last == .rect && fills.count == 2 && shape.isOn)
         // キーでツールを替えると、ボタンは、その図形になり、描き方は、その図形で最後に選んだもの（三角は、塗りつぶし）
         toolbar.show(tool: .triangle)
         #expect(try ids.filter { try cell($0).state == .on } == ["shape-triangle-fill"])
-        control.selectedSegment = Toolbar.segment(for: .pen)
-        control.selectedSegment = shapeSegment
-        control.sendAction(control.action, to: control.target)
+        pen.performClick(nil)
+        shape.performClick(nil)
         #expect(tools.last == .triangle)
     }
 }

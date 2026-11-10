@@ -11,19 +11,20 @@ enum CanvasRenderer {
         if let background = document.background {
             drawImage(background, in: document.backgroundRect, ctx)
         }
+        let numbers = NumberBadge.numbers(in: document.items)   // 番号の印の数字は、重なり順から決める（SPEC §3.2.8）
         for (index, item) in document.items.enumerated() {
             if faded.contains(index) {
                 ctx.saveGState()
                 ctx.setAlpha(0.25)
                 ctx.beginTransparencyLayer(in: item.bounds.insetBy(dx: -2, dy: -2), auxiliaryInfo: nil)   // 色の透明度・塗りの重なりを含めて、1 枚として薄くする。範囲は、要素の外接する範囲まで（キャンバス全体の大きさにすると、印の数だけ、大きなバッファを取り、遅い）
-                draw(item, in: ctx)
+                draw(item, number: numbers[index], in: ctx)
                 ctx.endTransparencyLayer()
                 ctx.restoreGState()
             } else {
-                draw(item, in: ctx)
+                draw(item, number: numbers[index], in: ctx)
             }
         }
-        if let draft { draw(draft, in: ctx) }
+        if let draft { draw(draft, number: NumberBadge.count(in: document.items) + 1, in: ctx) }
     }
 
     /// 文字の見た目。入力欄と描画で同じものを使う。
@@ -113,7 +114,7 @@ enum CanvasRenderer {
 
     // MARK: - 要素
 
-    private static func draw(_ item: Item, in ctx: CGContext) {
+    private static func draw(_ item: Item, number: Int? = nil, in ctx: CGContext) {
         ctx.saveGState()
         defer { ctx.restoreGState() }
         ctx.setStrokeColor(item.color)
@@ -166,7 +167,31 @@ enum CanvasRenderer {
                 .draw(with: box, options: [.usesLineFragmentOrigin])
         case .image(let image, let box):
             drawImage(image, in: box, ctx)
+        case .number(let box):
+            drawBadge(box, number: number ?? 1, color: item.color, in: ctx)
         }
+    }
+
+    /// 番号の印：色の丸、白い細い縁、太い白の数字（丸の色が白に近いときは、暗い数字）。回転は、呼び出し側（`draw`）が掛けている。
+    private static func drawBadge(_ box: CGRect, number: Int, color: CGColor, in ctx: CGContext) {
+        let diameter = min(box.width, box.height)
+        let disc = CGRect(x: box.midX - diameter / 2, y: box.midY - diameter / 2, width: diameter, height: diameter)
+        ctx.setFillColor(color)
+        ctx.fillEllipse(in: disc)
+        ctx.setStrokeColor(CGColor(gray: 1, alpha: 0.9))
+        ctx.setLineWidth(max(1.5, diameter * 0.05))
+        ctx.strokeEllipse(in: disc.insetBy(dx: 1, dy: 1))
+
+        let rgb = NSColor(cgColor: color)?.usingColorSpace(.sRGB)
+        let dark = rgb.map { NumberBadge.usesDarkNumeral(red: $0.redComponent, green: $0.greenComponent, blue: $0.blueComponent) } ?? false
+        let numeral = NSColor(srgbRed: 0.09, green: 0.09, blue: 0.11, alpha: 1)
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: diameter * 0.52, weight: .bold),
+            .foregroundColor: dark ? numeral : NSColor.white,
+        ]
+        let label = NSAttributedString(string: "\(number)", attributes: attributes)
+        let size = label.size()
+        label.draw(at: CGPoint(x: disc.midX - size.width / 2, y: disc.midY - size.height / 2))
     }
 
     /// 塗りつぶした図形：枠と同じ外形（線の太さを含む）の内側を、色で塗る。枠の線も、同じ色で引く（外形に溶ける）。

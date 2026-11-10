@@ -71,6 +71,11 @@ enum OpsApply {
                 let origin = clamp(at)
                 let box = imageBox(natural: image.pointSize, at: origin, width: width, height: height, canvas: canvas)
                 result.items.append(Item(content: .image(image, box: box), color: CGColor(gray: 0, alpha: 1), size: 0, rotation: radians(rotate)))
+
+            case .number(let at, let diameter, let color, let rotate):
+                let center = clamp(at)
+                let d = diameter ?? NumberBadge.diameter(forCanvas: canvas)
+                result.items.append(Item(content: .number(NumberBadge.box(center: center, diameter: d)), color: color.cgColor, size: 0, rotation: radians(rotate)))
             }
         }
         return .success(result)

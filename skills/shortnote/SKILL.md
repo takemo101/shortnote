@@ -46,6 +46,7 @@ SN=$(command -v snote || echo /Applications/ShortNote.app/Contents/MacOS/ShortNo
 | `rect` | same as `ellipse` | `color` `size` `fill` `rotate` | Rectangle outline; with `fill: true`, a solid rectangle |
 | `triangle` | same as `ellipse` | `color` `size` `fill` `rotate` | Isosceles triangle inscribed in the box (apex at the middle of the top side, base on the bottom side); with `fill: true`, a solid triangle. `rotate` turns it around the box centre |
 | `text` | `x` `y` (top-left) `text` (1–10000 chars, `\n` for a newline, not whitespace-only) | `color` `fontSize` (8–200, default 18) `rotate` | Text |
+| `number` | `x` `y` (centre of the badge) | `color` `d` (diameter 8–200; default canvas short side / 24, at least 22) `rotate` | Numbered badge: a filled circle in `color` with a white numeral (dark if `color` is near white). The numeral is **not a field**: it is the badge's rank (1, 2, 3…) among `number` items in stacking order, so removing one renumbers the rest. Use one per step, placed in the order you want them numbered. `size` and `fill` are errors on this op. `get` reports `x` `y` `d` `color` `rotate` (no numeral) |
 | `image` | `path` `x` `y` (top-left) | `w` `h` (≥ 1) `rotate` | Image. Without `w`/`h`: natural size (shrunk to fit if larger than the canvas). With only one: aspect ratio kept |
 
 - **An unknown `op`, an unknown key or an out-of-range value is an error** (typos are never silently ignored). If any operation is invalid, **nothing is applied**. The error carries the 0-based index of the offending operation (`op`).

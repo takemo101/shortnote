@@ -45,7 +45,7 @@ enum ItemHandles {
     }
 
     enum Kind: Equatable {
-        case image, ellipse, rect, triangle, text, line, pen
+        case image, ellipse, rect, triangle, text, line, pen, number
     }
 
     /// 取っ手を出す要素の、いまの形と、規則（要素の種類で決まる）。

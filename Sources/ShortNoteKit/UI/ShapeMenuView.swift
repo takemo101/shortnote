@@ -1,8 +1,8 @@
 import AppKit
 
-/// メニューのマス 1 つ。ボタンを押したまま（セグメント側で mouseDown）メニューを開き、そのままマスの上で離したときは、
+/// メニューのマス 1 つ。ボタンを押したまま（図形のボタン側で mouseDown）メニューを開き、そのままマスの上で離したときは、
 /// マスには mouseUp だけが届く。この場合も、押したことにする（普通のメニュー項目と同じ操作ができるように）。
-final class ShapeCellButton: NSButton {
+class ShapeCellButton: PaletteButton {
     private var sawMouseDown = false
 
     override func mouseDown(with event: NSEvent) {
@@ -31,20 +31,6 @@ final class ShapeMenuView: NSView {
         case .triangle: return filled ? "triangle.fill" : "triangle"
         default: return ""
         }
-    }
-
-    /// ツールバーのボタンの絵。円・四角・三角の SF Symbols は、大きさがまちまち（15×15、15×14、17×15）なので、17×15 の中央に置く
-    /// （どの選びでも、ボタンの幅が変わらず、右の部品が動かない）。
-    static func buttonImage(for tool: Tool, filled: Bool) -> NSImage? {
-        guard let symbol = NSImage(systemSymbolName: symbol(for: tool, filled: filled), accessibilityDescription: nil) else { return nil }
-        let image = NSImage(size: NSSize(width: 17, height: 15), flipped: false) { rect in
-            let s = symbol.size
-            symbol.draw(in: NSRect(x: rect.midX - s.width / 2, y: rect.midY - s.height / 2, width: s.width, height: s.height),
-                        from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
-            return true
-        }
-        image.isTemplate = true   // 色は、ボタンの色に合わせる
-        return image
     }
 
     static func title(for tool: Tool) -> String {
@@ -82,24 +68,15 @@ final class ShapeMenuView: NSView {
         super.init(frame: NSRect(origin: .zero, size: size))
         for (row, tool) in Self.shapes.enumerated() {
             for (column, filled) in [false, true].enumerated() {
-                let button = ShapeCellButton(frame: NSRect(
+                let title = "\(Self.title(for: tool))（\(filled ? "塗りつぶし" : "枠だけ")）"
+                let button = ShapeCellButton(symbol: Self.symbol(for: tool, filled: filled), label: title, role: .button, pointSize: 18, size: Self.cellSize)
+                button.frame = NSRect(
                     x: Self.inset + CGFloat(column) * Self.cellSize.width,
                     y: size.height - Self.inset - CGFloat(row + 1) * Self.cellSize.height,
                     width: Self.cellSize.width, height: Self.cellSize.height
-                ))
-                let title = "\(Self.title(for: tool))（\(filled ? "塗りつぶし" : "枠だけ")）"
-                let symbolConfig = NSImage.SymbolConfiguration(pointSize: 18, weight: .regular)
-                button.image = NSImage(systemSymbolName: Self.symbol(for: tool, filled: filled), accessibilityDescription: title)?
-                    .withSymbolConfiguration(symbolConfig)
-                button.imagePosition = .imageOnly
-                button.setButtonType(.pushOnPushOff)
-                button.bezelStyle = .smallSquare
-                button.isBordered = true
+                ).insetBy(dx: 2, dy: 2)   // マスの間に、すきまを置く
                 button.target = self
                 button.action = #selector(chosen(_:))
-                button.refusesFirstResponder = true
-                button.toolTip = title
-                button.setAccessibilityLabel(title)
                 button.setAccessibilityIdentifier(Self.identifier(for: tool, filled: filled))
                 addSubview(button)
                 cells.append((tool, filled, button))
@@ -112,6 +89,7 @@ final class ShapeMenuView: NSView {
 
     /// いまの選びに、印（押された形）を合わせる。
     func show(tool: Tool, filled: Bool) {
+        for cell in cells { (cell.button as? PaletteButton)?.clearHover() }
         for cell in cells { cell.button.state = (cell.tool == tool && cell.filled == filled) ? .on : .off }
     }
 

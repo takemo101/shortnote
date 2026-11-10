@@ -27,6 +27,7 @@ final class ShortcutsWindowController: NSObject, NSWindowDelegate {
         super.init()
         window.title = "ショートカット"
         window.isReleasedWhenClosed = false
+        window.level = .floating   // ShortNote のパネルと同じ階層（パネルは .floating）。通常の階層だと、パネルの裏に隠れる
         window.delegate = self
         buildUI()
         reload()
