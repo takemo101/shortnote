@@ -30,6 +30,7 @@ struct ColorMenuTests {
 
     @Test("マスを押すと、見本の色が替わり、onChange で届く。メニューを開き直すと、いまの色のマスだけに輪が付く")
     func choosingACell() throws {
+        _ = NSApplication.shared   // `sendAction` は、アプリのオブジェクトを通す。ほかのテストが先に作っていないと（CI の順序では）、何も送られない
         let swatch = ColorSwatchButton()
         var received: [NSColor] = []
         swatch.onChange = { received.append($0) }

@@ -134,16 +134,18 @@ final class Toolbar: NSObject {
     }
 
     /// 上のパレットの、縁に沿った長さのうち、いちばん長い形（ブラシのスライダー、または文字サイズのポップアップが出ているとき）。
-    /// 大きさの部品は、ツールによって出入りするので、いまの長さに、出ていない分（長いほうの部品）を足す。縁に沿った位置の余りを決めるのに使う。
+    /// 大きさの部品は、ツールによって出入りする。出入りさせて、実際の長さを測る（見積もりではなく。環境で部品の大きさが違っても合う）。縁に沿った位置の余りを決めるのに使う。
     var longestPillLength: CGFloat {
         let vertical = orientation.isVertical
-        let fitting = topPill.fittingSize
-        let current = vertical ? fitting.height : fitting.width
-        func extent(_ view: NSView) -> CGFloat { vertical ? view.fittingSize.height : (view === slider ? sliderWidth.constant : view.fittingSize.width) }
-        let spacing = topPill.spacing
-        let shown = (slider.isHidden ? 0 : extent(slider) + spacing) + (textSizePopup.isHidden ? 0 : extent(textSizePopup) + spacing)
-        let longest = max(extent(slider), extent(textSizePopup)) + spacing
-        return current - shown + longest
+        let shown = (slider.isHidden, textSizePopup.isHidden)
+        defer { (slider.isHidden, textSizePopup.isHidden) = shown }
+        func length(slider showsSlider: Bool, popup showsPopup: Bool) -> CGFloat {
+            slider.isHidden = !showsSlider
+            textSizePopup.isHidden = !showsPopup
+            let size = topPill.fittingSize
+            return vertical ? size.height : size.width
+        }
+        return max(length(slider: true, popup: false), length(slider: false, popup: true))
     }
 
     private lazy var colorWell: ColorSwatchButton = {
