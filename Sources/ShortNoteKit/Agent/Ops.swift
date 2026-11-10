@@ -31,6 +31,8 @@ enum Op: Equatable {
     case triangle(rect: CGRect, color: RGBA, size: CGFloat, fill: Bool = false, rotate: Double = 0)
     case text(String, at: CGPoint, color: RGBA, fontSize: CGFloat, rotate: Double = 0)
     case image(path: String, at: CGPoint, width: CGFloat?, height: CGFloat?, rotate: Double = 0)
+    /// 番号の印（SPEC §3.2.8）。`at` は丸の中心。`diameter` を省くと、キャンバスの大きさから決める。
+    case number(at: CGPoint, diameter: CGFloat?, color: RGBA, rotate: Double = 0)
 }
 
 /// 操作の JSON を、検証して `[Op]` にする。検証はここだけで行い、受け取る側は再検証しない。
@@ -119,8 +121,13 @@ enum OpsParser {
                 let at = CGPoint(x: try fields.required("x"), y: try fields.required("y"))
                 let w = try fields.optionalSide("w"), h = try fields.optionalSide("h")
                 return .success(.image(path: path, at: at, width: w, height: h, rotate: try fields.rotate()))
+            case "number":
+                try fields.allow(["op", "x", "y", "color", "d", "rotate"])
+                let at = CGPoint(x: try fields.required("x"), y: try fields.required("y"))
+                let diameter = try fields.optionalNumber("d", in: Double(NumberBadge.diameterRange.lowerBound)...Double(NumberBadge.diameterRange.upperBound))
+                return .success(.number(at: at, diameter: diameter.map { CGFloat($0) }, color: try fields.color(), rotate: try fields.rotate()))
             default:
-                throw fields.fail("知らない `op` です：\(name)（pen・line・ellipse・rect・triangle・text・image のどれか）")
+                throw fields.fail("知らない `op` です：\(name)（pen・line・ellipse・rect・triangle・text・number・image のどれか）")
             }
         } catch let error as AgentError {
             return .failure(error)

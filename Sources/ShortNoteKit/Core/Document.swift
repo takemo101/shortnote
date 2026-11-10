@@ -132,6 +132,8 @@ struct Document {
             return ItemHandles.Target(kind: .triangle, shape: .box(rect, rotation: item.rotation), keepsAspect: false, minSide: ItemHandles.shapeMinSide)
         case .text(_, let box):
             return ItemHandles.Target(kind: .text, shape: .box(box, rotation: item.rotation), keepsAspect: true, minSide: ItemHandles.shapeMinSide)
+        case .number(let box):
+            return ItemHandles.Target(kind: .number, shape: .box(box, rotation: item.rotation), keepsAspect: true, minSide: NumberBadge.diameterRange.lowerBound)
         case .line(let from, let to):
             return ItemHandles.Target(kind: .line, shape: .line(from: from, to: to), keepsAspect: false, minSide: 0)
         case .pen(let points):
@@ -159,6 +161,10 @@ struct Document {
             copy.items[index].content = .rect(box); copy.items[index].rotation = angle
         case (.triangle, .box(let box, let angle)):
             copy.items[index].content = .triangle(box); copy.items[index].rotation = angle
+        case (.number, .box(let box, let angle)):
+            // 直径の上限（操作の JSON の `d` と同じ）を超える変更は、受け付けない（`get` を、そのまま `draw` に渡せるように）
+            guard max(box.width, box.height) <= NumberBadge.diameterRange.upperBound + 1e-6 else { return nil }
+            copy.items[index].content = .number(box); copy.items[index].rotation = angle
         case (.text(let text, _), .box(let box, let angle)):
             copy.items[index].content = .text(text, box: box); copy.items[index].rotation = angle
             if let fontSize { copy.items[index].size = fontSize }
@@ -180,7 +186,7 @@ struct Document {
             copy.items[index].content = .pen(points: points.map { StrokePoint(point: ItemHandles.rotate($0.point, about: center, by: angle), pressure: $0.pressure) })
         case .line(let from, let to):
             copy.items[index].content = .line(from: ItemHandles.rotate(from, about: center, by: angle), to: ItemHandles.rotate(to, about: center, by: angle))
-        case .ellipse, .rect, .triangle, .text, .image:
+        case .ellipse, .rect, .triangle, .text, .image, .number:
             copy.items[index].rotation = ItemHandles.normalized(items[index].rotation + angle)
         }
         return copy

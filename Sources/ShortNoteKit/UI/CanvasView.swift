@@ -2,7 +2,7 @@ import AppKit
 
 /// 描画ツール。ツールバーのボタンの並び（ペン／直線／図形／文字／移動／ハンド）とは別で、円・四角・三角は、「図形」のボタン 1 つにまとまる（`Toolbar`）。
 enum Tool: CaseIterable {
-    case pen, line, ellipse, rect, triangle, text, move, hand, eraser
+    case pen, line, ellipse, rect, triangle, text, move, hand, eraser, number
 }
 
 /// キャンバス。ポインタ入力を、`Document` の変更（履歴つき）につなぐ。描画は `CanvasRenderer`、文字入力は `InlineTextEditor` が行う。
@@ -418,6 +418,9 @@ final class CanvasView: NSView {
             draft = Item(content: .triangle(CGRect(origin: p, size: .zero)), color: color.cgColor, size: brushSize, filled: fillTriangle)
         case .line:
             draft = Item(content: .line(from: p, to: p), color: color.cgColor, size: brushSize, arrow: lineArrow)
+        case .number:
+            // クリックで置く（押したまま動かすと、離すまで位置を調整できる）。丸の大きさは、キャンバスの大きさから決める（SPEC §3.2.8）
+            draft = Item(content: .number(NumberBadge.box(center: p, diameter: NumberBadge.diameter(forCanvas: canvasSize))), color: color.cgColor, size: 0)
         case .text:
             beginText(at: p)
         case .eraser:
@@ -549,6 +552,8 @@ final class CanvasView: NSView {
             draft?.content = .triangle(dragRect(to: p))
         case .line(let from, _):
             draft?.content = .line(from: from, to: p)
+        case .number(let box):
+            draft?.content = .number(NumberBadge.box(center: p, diameter: box.width))   // 離すまで、位置を調整できる
         case .text, .image:
             break
         }

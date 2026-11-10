@@ -24,6 +24,8 @@ struct Item {
         case triangle(CGRect)
         case text(String, box: CGRect)
         case image(ImportedImage, box: CGRect)
+        /// 番号の印（連番）。`CGRect` は、丸の外接する四角（正方形）。数字は持たず、重なり順から決める（`NumberBadge`）。色は、丸の色。`size` は使わない（0）。
+        case number(CGRect)
     }
 
     var content: Content
@@ -70,7 +72,7 @@ struct Item {
             return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY).insetBy(dx: -size / 2, dy: -size / 2)
         case .ellipse(let rect), .rect(let rect), .triangle(let rect):
             return rect.insetBy(dx: -size / 2, dy: -size / 2)
-        case .text(_, let box), .image(_, let box):
+        case .text(_, let box), .image(_, let box), .number(let box):
             return box
         }
     }
@@ -93,6 +95,8 @@ struct Item {
             item.content = .text(text, box: box.offsetBy(dx: d.width, dy: d.height))
         case .image(let image, let box):
             item.content = .image(image, box: box.offsetBy(dx: d.width, dy: d.height))
+        case .number(let box):
+            item.content = .number(box.offsetBy(dx: d.width, dy: d.height))
         }
         return item
     }
@@ -103,7 +107,7 @@ struct Item {
         switch (content, other.content) {
         case (.pen(let a), .pen(let b)): return a == b
         case (.line(let a1, let a2), .line(let b1, let b2)): return a1 == b1 && a2 == b2
-        case (.ellipse(let a), .ellipse(let b)), (.rect(let a), .rect(let b)), (.triangle(let a), .triangle(let b)): return a == b
+        case (.ellipse(let a), .ellipse(let b)), (.rect(let a), .rect(let b)), (.triangle(let a), .triangle(let b)), (.number(let a), .number(let b)): return a == b
         case (.text(let s, let a), .text(let t, let b)): return s == t && a == b
         case (.image(_, let a), .image(_, let b)): return a == b
         default: return false

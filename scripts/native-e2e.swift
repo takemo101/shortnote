@@ -277,8 +277,8 @@ if drag(line(pt(280, 30), pt(440, 30)), pid: pid), let p = export(), let r = loa
 } else { rec("C6 pen stroke", "blocked", "pointer guard refused (hit target not candidate) or export failed") }
 
 // shapes
-/// ツールバーのセグメントの番号（左から）。SPEC §4 の並び：ペン／直線／図形（円・四角・三角）／文字／消しゴム／移動／ハンド。キーの番号（1〜9）とは別。
-enum Seg { static let pen = 0, line = 1, shape = 2, text = 3, eraser = 4, move = 5, hand = 6; static let count = 7 }
+/// 上のパレットのツールのボタン（AXRadioButton）の番号（左から）。SPEC §4 の並び：ペン／直線／図形（円・四角・三角）／文字／番号／消しゴム／移動／ハンド。キーの番号（0〜9）とは別。
+enum Seg { static let pen = 0, line = 1, shape = 2, text = 3, number = 4, eraser = 5, move = 6, hand = 7; static let count = 8 }
 func selectTool(_ i: Int) -> Bool { guard radios.count == Seg.count, AXUIElementPerformAction(radios[i], kAXPressAction as CFString) == .success else { return false }
     return wait(2) { (ax(radios[i], "AXValue") as? NSNumber)?.intValue == 1 } }
 /// 図形のメニューのマス（`shape-<ellipse|rect|triangle>-<outline|fill>`）。メニューが開いているときだけ、AX に出る。
@@ -880,6 +880,7 @@ func typeAndMeasure(_ x: Double, _ y: Double, rows y0: Double, _ y1: Double) -> 
     guard wait(2, { editorAreas().isEmpty }), let r = exportImg() else { return nil }
     return darkHeight(r, x - 2, y0, x + 300, y1)
 }
+_ = selectTool(Seg.text)   // 文字サイズのポップアップは、文字のツールのときだけ出る（SPEC §4）
 let textSizeIds = ["X1 the text-size popup exists and defaults to 18 pt", "X2 the chosen size is the size of the committed text (18 pt vs 64 pt)", "X3 the text size does not follow the brush size", "X4 changing the size while typing resizes the editor"]
 if let why = keyGuard(pid, app) {
     for id in textSizeIds { rec(id, "blocked", "keyboard guard: \(why)") }
@@ -1842,6 +1843,170 @@ do {
         } else { rec(eraserIds[1], "blocked", "drag guard refused") }
         _ = selectTool(Seg.pen)
     } else { for id in eraserIds { rec(id, "blocked", "tool select failed") } }
+    _ = runCLI(["clear"])
+}
+
+// ---- 番号ツール（A41）：クリックで置く。数字は並びから決まる（1 つ消すと詰まる）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let numberIds = [
+        "NB1 number tool: two real-pointer clicks place two badges centred on the clicks (get reports op number with x,y,d and no numeral); the export shows a coloured disc",
+        "NB2 erasing the first badge with the eraser leaves the second, whose numeral changes from 2 to 1 (the white pixels inside the disc change); one Cmd+Z brings the first back",
+    ]
+    _ = runCLI(["clear"])
+    if let g0 = agentGet() { canvasWidthPt = g0.canvas.0 }
+    func badges() -> [[String: Any]] { agentGet()?.items.filter { $0["op"] as? String == "number" } ?? [] }
+    /// 丸の中の、白い画素の数（数字の画素）。丸は半径 11 pt：中心から 9 pt 以内だけを数える。
+    func numeralPixels(_ r: NSBitmapImageRep, _ cx: Double, _ cy: Double) -> Int {
+        var n = 0
+        for dy in stride(from: -9.0, through: 9.0, by: 0.5) { for dx in stride(from: -9.0, through: 9.0, by: 0.5) where dx * dx + dy * dy <= 81 {
+            let p = at(r, cx + dx, cy + dy)
+            if p.r > 0.85 && p.g > 0.85 && p.b > 0.85 { n += 1 }
+        } }
+        return n
+    }
+    if keyGuard(pid, app) != nil {
+        for id in numberIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == Seg.count, selectTool(Seg.number) {
+        let c1 = click(pt(100, 100)), c2 = click(pt(220, 160))
+        let b = badges()
+        let xs = b.compactMap { numOf($0["x"]) }, ys = b.compactMap { numOf($0["y"]) }, ds = b.compactMap { numOf($0["d"]) }
+        let hasNumeralField = b.contains { $0["number"] != nil }
+        let placed = c1 && c2 && b.count == 2 && xs.count == 2 && abs(xs[0] - 100) < 2 && abs(ys[0] - 100) < 2 && abs(xs[1] - 220) < 2 && abs(ys[1] - 160) < 2 && ds.allSatisfy { abs($0 - 22) < 1 } && !hasNumeralField
+        var discNote = "export failed"
+        var disc = false
+        var before = 0
+        if let r = exportImg() {
+            let edge = at(r, 220 + 6, 160 + 6)   // 丸の内側（縁の白い線の内側で、数字から離れた所）は、色（既定の黒）。背景は、画像（白ではない）なので、丸の外は見ない
+            disc = isDark(edge)
+            before = numeralPixels(r, 220, 160)
+            discNote = "disc inside dark=\(isDark(edge)), numeral pixels at the second badge=\(before) (expect > 0)"
+            disc = disc && before > 0
+        }
+        rec(numberIds[0], (placed && disc) ? "pass" : "fail", "badges=\(b.count) x=\(xs) y=\(ys) d=\(ds) numeralField=\(hasNumeralField); \(discNote)")
+
+        // NB2：消しゴムで、1 つ目を消す → 2 つ目の数字が 2 から 1 に変わる
+        if radios.count == Seg.count, selectTool(Seg.eraser) {
+            let erased = drag(line(pt(92, 100), pt(108, 100)), pid: pid)
+            let after = badges()
+            var changed = false, afterPixels = 0
+            if let r = exportImg() { afterPixels = numeralPixels(r, 220, 160); changed = before > 0 && afterPixels > 0 && afterPixels != before }
+            key(6, .maskCommand)
+            let restored = badges().count
+            rec(numberIds[1], (erased && after.count == 1 && abs((numOf(after.first?["x"]) ?? 0) - 220) < 2 && changed && restored == 2) ? "pass" : "fail",
+                "after erasing the first: badges=\(after.count) (expect 1, at x=220); numeral pixels at the survivor \(before) -> \(afterPixels) (expect different); after Cmd+Z badges=\(restored) (expect 2)")
+        } else { rec(numberIds[1], "blocked", "eraser tool select failed") }
+        _ = selectTool(Seg.pen)
+    } else { for id in numberIds { rec(id, "blocked", "tool select failed") } }
+    _ = runCLI(["clear"])
+}
+
+// ---- パレットのドラッグ（A40）：つまみを動かして、左の縁にくっつける → 縦並び。キャンバスの大きさは変わらない。戻す ----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let dockIds = [
+        "PD1 dragging the palette grip to the canvas's left edge docks the palette on the left (tool buttons stacked vertically), the canvas keeps its size, and paletteOrientation=left is saved",
+        "PD2 dragging the grip (now at the top of the vertical palette) to above the canvas docks it on top again (tool buttons in one row) and the canvas keeps its size",
+    ]
+    func grip() -> AXUIElement? { collect(app) { axs($0, "AXDescription") == "パレットを動かす" }.first }
+    func center(_ e: AXUIElement) -> CGPoint? {
+        guard let pv = ax(e, "AXPosition"), let sv = ax(e, "AXSize") else { return nil }
+        var p = CGPoint.zero, s = CGSize.zero
+        AXValueGetValue(pv as! AXValue, .cgPoint, &p); AXValueGetValue(sv as! AXValue, .cgSize, &s)
+        return CGPoint(x: p.x + s.width / 2, y: p.y + s.height / 2)
+    }
+    func toolPositions() -> [CGPoint] { radios.prefix(Seg.count).compactMap { r in center(r) } }
+    if keyGuard(pid, app) != nil {
+        for id in dockIds { rec(id, "blocked", "keyboard guard") }
+    } else if let g = grip(), let start = center(g), let cf0 = canvasFrame() {
+        // 左の縁（キャンバスの左端から 20 pt、高さの中ほど）へ。ポインタは、窓の中に収める
+        let target = CGPoint(x: cf0.minX + 20, y: cf0.midY)
+        let moved = drag(line(start, target, steps: 30), pid: pid)
+        usleep(600_000)
+        let pos = toolPositions()
+        let vertical = pos.count == Seg.count && Set(pos.map { Int($0.x.rounded()) }).count == 1 && zip(pos, pos.dropFirst()).allSatisfy { $1.y > $0.y }
+        let cf1 = canvasFrame()
+        let sameSize = cf1.map { abs($0.width - cf0.width) < 1 && abs($0.height - cf0.height) < 1 } ?? false
+        let leftOfCanvas = cf1.map { (pos.first?.x ?? 1e9) < $0.minX } ?? false
+        let saved = readDefault("paletteOrientation")
+        rec(dockIds[0], (moved && vertical && sameSize && leftOfCanvas && saved == "left") ? "pass" : "fail",
+            "drag ok=\(moved); tool buttons vertical=\(vertical) (x set=\(Set(pos.map { Int($0.x.rounded()) }))); canvas size \(cf0.size) -> \(String(describing: cf1?.size)) (same=\(sameSize)); left of canvas=\(leftOfCanvas); saved=\(saved ?? "nil")")
+
+        // PD2：戻す。つまみは、縦のパレットの上端にある。キャンバスの上の縁（左上から少し右）へ
+        if let g2 = grip(), let s2 = center(g2), let cf2 = canvasFrame() {
+            let back = CGPoint(x: cf2.minX + 240, y: cf2.minY + 10)
+            let moved2 = drag(line(s2, back, steps: 30), pid: pid)
+            usleep(600_000)
+            let pos2 = toolPositions()
+            let horizontal = pos2.count == Seg.count && Set(pos2.map { Int($0.y.rounded()) }).count == 1 && zip(pos2, pos2.dropFirst()).allSatisfy { $1.x > $0.x }
+            let cf3 = canvasFrame()
+            let same2 = cf3.map { abs($0.width - cf0.width) < 1 && abs($0.height - cf0.height) < 1 } ?? false
+            rec(dockIds[1], (moved2 && horizontal && same2 && readDefault("paletteOrientation") == "top") ? "pass" : "fail",
+                "drag ok=\(moved2); tool buttons in one row=\(horizontal); canvas size same=\(same2); saved=\(readDefault("paletteOrientation") ?? "nil")")
+        } else { rec(dockIds[1], "blocked", "grip or canvas frame not found after docking left") }
+    } else { for id in dockIds { rec(id, "blocked", "palette grip (AXDescription パレットを動かす) or canvas frame not found") } }
+    if bundleIdOK { sh(["defaults", "delete", bundleId, "paletteOrientation"]); sh(["defaults", "delete", bundleId, "paletteOffset"]) }
+}
+
+// ---- 色の見本のメニュー（A42）：代表色のマスと、「その他の色…」（色のパネル）----
+do {
+    clearMouseFlags = true
+    defer { clearMouseFlags = false }
+    let colorIds = [
+        "CL1 the colour swatch menu (AXShowMenu) lists 12 preset cells plus color-other; pressing the red cell (color-E53935) makes the next real-pointer pen stroke red (get reports colour #E53935)",
+        "CL2 pressing color-other in the swatch menu opens the colour panel (a second window of the app appears)",
+    ]
+    _ = runCLI(["clear"])
+    func swatch() -> AXUIElement? { collect(app) { axs($0, "AXRole") == "AXButton" && axs($0, "AXTitle") == "色" }.first }
+    func colorCells() -> [AXUIElement] { collect(app) { (axs($0, "AXIdentifier") ?? "").hasPrefix("color-") } }
+    func openSwatchMenu() -> Bool {
+        guard let s = swatch() else { return false }
+        AXUIElementSetMessagingTimeout(app, 1.0); defer { AXUIElementSetMessagingTimeout(app, 0) }
+        _ = AXUIElementPerformAction(s, "AXShowMenu" as CFString)
+        return wait(3) { colorCells().count >= 13 }
+    }
+    if keyGuard(pid, app) != nil {
+        for id in colorIds { rec(id, "blocked", "keyboard guard") }
+    } else if radios.count == Seg.count, selectTool(Seg.pen) {
+        AXUIElementSetMessagingTimeout(app, 1.0)
+        let opened = openSwatchMenu()
+        let cellCount = colorCells().filter { axs($0, "AXIdentifier") != "color-other" }.count
+        let hasOther = colorCells().contains { axs($0, "AXIdentifier") == "color-other" }
+        var pressed = false
+        if opened, let red = colorCells().first(where: { axs($0, "AXIdentifier") == "color-E53935" }) {
+            pressed = AXUIElementPerformAction(red, kAXPressAction as CFString) == .success
+        }
+        AXUIElementSetMessagingTimeout(app, 0)
+        usleep(500_000)   // メニューが閉じるのを待つ
+        let stroked = drag(line(pt(100, 100), pt(260, 100)), pid: pid)
+        let strokes = agentGet()?.items.filter { $0["op"] as? String == "pen" } ?? []
+        let color = strokes.last?["color"] as? String
+        rec(colorIds[0], (opened && cellCount == 12 && hasOther && pressed && stroked && color?.uppercased() == "#E53935") ? "pass" : "fail",
+            "menu opened=\(opened) preset cells=\(cellCount) (expect 12) color-other=\(hasOther); pressed red=\(pressed); stroke drawn=\(stroked), pen colour=\(color ?? "nil") (expect #E53935)")
+
+        // CL2：「その他の色…」で、色のパネルが開く（自分のプロセスの、2 つ目のウィンドウ）
+        let windowsBefore = infos(true).filter { owner($0) == pid && ($0[kCGWindowName as String] as? String) != "ShortNote" && bounds($0).height > 100 }.count
+        AXUIElementSetMessagingTimeout(app, 1.0)
+        var otherPressed = false
+        if openSwatchMenu(), let other = colorCells().first(where: { axs($0, "AXIdentifier") == "color-other" }) {
+            otherPressed = AXUIElementPerformAction(other, kAXPressAction as CFString) == .success
+        }
+        AXUIElementSetMessagingTimeout(app, 0)
+        let panelOpened = wait(3) { infos(true).filter { owner($0) == pid && ($0[kCGWindowName as String] as? String) != "ShortNote" && bounds($0).height > 100 }.count > windowsBefore }
+        rec(colorIds[1], (otherPressed && panelOpened) ? "pass" : "fail", "pressed color-other=\(otherPressed); colour panel window appeared=\(panelOpened) (other windows of the app: \(windowsBefore) before)")
+        // 色のパネルを閉じる（Esc は、パネルが前面のときだけ効く。閉じるボタンを、AX で押す）
+        for w in collect(app, { axs($0, "AXRole") == "AXWindow" && axs($0, "AXTitle") != "ShortNote" }) {
+            if let close = ax(w, "AXCloseButton") { _ = AXUIElementPerformAction(close as! AXUIElement, kAXPressAction as CFString) }
+        }
+        // 後のケースのために、色を黒へ戻す
+        AXUIElementSetMessagingTimeout(app, 1.0)
+        if openSwatchMenu(), let black = colorCells().first(where: { axs($0, "AXIdentifier") == "color-000000" }) { _ = AXUIElementPerformAction(black, kAXPressAction as CFString) }
+        AXUIElementSetMessagingTimeout(app, 0)
+        usleep(500_000)
+        _ = selectTool(Seg.pen)
+    } else { for id in colorIds { rec(id, "blocked", "tool select failed") } }
     _ = runCLI(["clear"])
 }
 

@@ -161,23 +161,26 @@ struct TriangleCanvasTests {
     }
 }
 
-@Suite("図形のメニュー：ボタンの幅・離して選ぶ（レビューの指摘）")
+@Suite("図形のメニュー：パレットの幅・離して選ぶ（レビューの指摘）")
 @MainActor
 struct ShapeMenuBehaviourTests {
     private func allSubviews(_ view: NSView) -> [NSView] { view.subviews + view.subviews.flatMap(allSubviews) }
 
-    @Test("どのマスを選んでも、図形のボタンの幅・ツールバーの上段の幅は変わらない（絵の大きさが、円・四角・三角でまちまちでも）")
+    @Test("どのマスを選んでも、上のパレットの幅は変わらない（ツールのボタンが動かない）。どのツールでも、パレットは、キャンバスの最小の幅（480 pt）に収まる")
     func widthIsConstant() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 7 })
-        let grid = try #require(control.menu(forSegment: Toolbar.segment(for: .ellipse))?.items.first?.view as? ShapeMenuView)
+        let grid = try #require(toolbar.button(for: .ellipse).menuProvider?().flatMap { $0.items.first?.view as? ShapeMenuView })
         let cells = allSubviews(grid).compactMap { $0 as? NSButton }
         #expect(cells.count == 6)
-        let widthBefore = control.intrinsicContentSize.width, rowBefore = toolbar.topRow.fittingSize.width
-        #expect(rowBefore <= CanvasView.minimumSize.width, "上段が、キャンバスの最小（480 pt）を超えた：\(rowBefore)")
+        let widthBefore = toolbar.topPill.fittingSize.width
         for cell in cells {
             cell.performClick(nil)
-            #expect(control.intrinsicContentSize.width == widthBefore && toolbar.topRow.fittingSize.width == rowBefore, "\(cell.accessibilityIdentifier()) で幅が変わった")
+            #expect(toolbar.topPill.fittingSize.width == widthBefore, "\(cell.accessibilityIdentifier()) で幅が変わった")
+        }
+        for tool in Tool.allCases {
+            toolbar.show(tool: tool)
+            let width = toolbar.topPill.fittingSize.width
+            #expect(width <= CanvasView.minimumSize.width, "\(tool) で、パレットが、キャンバスの最小の幅を超えた：\(width)")   // 窓の余白は、キャンバスと同じ左右 12 pt
         }
     }
 

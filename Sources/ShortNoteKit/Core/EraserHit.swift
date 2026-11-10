@@ -70,7 +70,7 @@ extension Item {
                 d = min(d, EraserHit.distance(segment: head.tip, head.end, toSegment: a, b))
             }
             return d <= radius + half
-        case .rect(let rect), .ellipse(let rect), .triangle(let rect), .text(_, box: let rect), .image(_, box: let rect):
+        case .rect(let rect), .ellipse(let rect), .triangle(let rect), .text(_, box: let rect), .image(_, box: let rect), .number(let rect):
             // 回した枠は、ポインタの動きを逆に回して、回る前の枠の上で調べる
             let center = CGPoint(x: rect.midX, y: rect.midY)
             let p = ItemHandles.rotate(a, about: center, by: -rotation), q = ItemHandles.rotate(b, about: center, by: -rotation)
@@ -81,6 +81,8 @@ extension Item {
                 return outlineTouched(EraserHit.ellipsePolygon(in: rect), from: p, to: q, radius: radius + half)
             case .triangle:
                 return outlineTouched(Triangle.points(in: rect), from: p, to: q, radius: radius + half)
+            case .number:   // 丸の中（塗りつぶした円）
+                return outlineTouched(EraserHit.ellipsePolygon(in: rect), from: p, to: q, radius: radius, filledOverride: true)
             default:   // 文字・画像：枠の中（線の太さは無い）
                 return outlineTouched(EraserHit.rectPolygon(rect), from: p, to: q, radius: radius, filledOverride: true)
             }

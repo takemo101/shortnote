@@ -155,46 +155,49 @@ struct ArrowUITests {
     @Test("ツールバー：直線のボタンにメニュー（線／矢印／両端の矢印）。選ぶと、通知・チェック・ツールの切り替えが起きる。図形のメニューとは別")
     func toolbarMenu() throws {
         let toolbar = Toolbar()
-        let control = try #require(allSubviews(toolbar.topRow).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 7 })
-        let menu = try #require(control.menu(forSegment: Toolbar.segment(for: .line)))
+        let line = toolbar.button(for: .line)
+        let menu = try #require(line.menuProvider?())
         #expect(menu.items.map(\.title) == ["線", "矢印", "両端の矢印"])
         #expect(menu.items.map(\.state) == [.on, .off, .off])
         #expect(menu.items.allSatisfy { $0.image != nil })
-        #expect(control.showsMenuIndicator(forSegment: Toolbar.segment(for: .line)))
-        #expect(control.menu(forSegment: Toolbar.segment(for: .pen)) == nil)
+        #expect(toolbar.button(for: .pen).menuProvider == nil)
 
         var arrows: [Item.Arrow] = [], tools: [Tool] = [], fills: [String] = []
         toolbar.onSelectArrow = { arrows.append($0) }
         toolbar.onSelectTool = { tools.append($0) }
         toolbar.onSelectFill = { fills.append("\($0)=\($1)") }
-        control.selectedSegment = Toolbar.segment(for: .pen)
+        toolbar.show(tool: .pen)
 
         menu.performActionForItem(at: 2)
-        #expect(arrows == [.both] && tools == [.line] && control.selectedSegment == Toolbar.segment(for: .line) && fills.isEmpty)
-        #expect(menu.items.map(\.state) == [.off, .off, .on])
+        #expect(arrows == [.both] && tools == [.line] && line.isOn && !toolbar.button(for: .pen).isOn && fills.isEmpty)
+        // チェックは、開くたびに、いまの選びで作り直す
+        func states() throws -> [NSControl.StateValue] { try #require(line.menuProvider?()).items.map(\.state) }
+        #expect(try states() == [.off, .off, .on])
         menu.performActionForItem(at: 1)
-        #expect(arrows == [.both, .end] && menu.items.map(\.state) == [.off, .on, .off])
+        #expect(arrows == [.both, .end])
+        #expect(try states() == [.off, .on, .off])
         menu.performActionForItem(at: 0)
-        #expect(arrows.last == Item.Arrow.none && menu.items.map(\.state) == [.on, .off, .off])
+        #expect(arrows.last == Item.Arrow.none)
+        #expect(try states() == [.on, .off, .off])
     }
 }
 
-@Suite("矢印：ツールバーの幅（レビューの指摘）")
+@Suite("矢印：ボタンの絵")
 @MainActor
-struct ArrowToolbarWidthTests {
-    @Test("どの矢じりを選んでも、ボタンの幅・ツールバーの上段の幅は変わらない。ボタンの絵は、選びに合わせて変わる")
-    func widthIsConstant() throws {
+struct ArrowToolbarImageTests {
+    @Test("矢じりを選ぶと、直線のボタンの絵が、選びに合わせて変わる（線・矢印・両端の矢印は、どれも別の絵）")
+    func buttonImageFollowsTheChoice() throws {
         let toolbar = Toolbar()
-        let control = try #require((toolbar.topRow.subviews + toolbar.topRow.subviews.flatMap(\.subviews)).compactMap { $0 as? NSSegmentedControl }.first { $0.segmentCount == 7 })
-        let menu = try #require(control.menu(forSegment: Toolbar.segment(for: .line)))
-        let widthBefore = control.intrinsicContentSize.width, rowBefore = toolbar.topRow.fittingSize.width
-        let imageBefore = control.image(forSegment: Toolbar.segment(for: .line))?.tiffRepresentation
-        menu.performActionForItem(at: 2)   // 両端の矢印（絵を作り直す）
-        #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1)     // 以前は 2 pt 広がった（16×15 の絵）。ボタンの幅は、最大 1 pt の差までを許す（実測：両端の矢印で、ちょうど 1 pt 広がる）
-        #expect(abs(toolbar.topRow.fittingSize.width - rowBefore) <= 1)             // 半分の pt の丸めだけは許す
-        #expect(control.image(forSegment: Toolbar.segment(for: .line))?.tiffRepresentation != imageBefore)
-        menu.performActionForItem(at: 1)
-        #expect(abs(control.intrinsicContentSize.width - widthBefore) <= 1 && abs(toolbar.topRow.fittingSize.width - rowBefore) <= 1)
+        let line = toolbar.button(for: .line)
+        let menu = try #require(line.menuProvider?())
+        func image() -> Data? { line.image?.tiffRepresentation }
+        menu.performActionForItem(at: 1)   // 矢印
+        let end = image()
+        menu.performActionForItem(at: 2)   // 両端の矢印
+        let both = image()
+        menu.performActionForItem(at: 0)   // 線
+        let none = image()
+        #expect(Set([end, both, none]).count == 3 && none != nil && end != nil && both != nil)
     }
 }
 
