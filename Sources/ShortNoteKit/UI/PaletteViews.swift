@@ -207,8 +207,10 @@ class PaletteButton: NSButton {
     /// 押し続けたときに開くメニュー。無ければ、ふつうのボタン。
     var menuProvider: (() -> NSMenu?)? { didSet { needsDisplay = true } }
     private var hovering = false { didSet { if oldValue != hovering { refresh() } } }
+    /// 押している間（自分で追跡する、ふつうの操作ボタン）。
+    private var pressing = false { didSet { if oldValue != pressing { refresh() } } }
 
-    /// 選んでいる（`state` が on）。押したとき自動で入れ替わるのは、`setButtonType(.pushOnPushOff)` のボタンだけ。
+    /// 選んでいる（`state` が on）。標準のボタンは、押す・アクセシビリティの「押す」のたびに、`state` を入れ替えてしまうので、ふつうの操作ボタンは、セル（`PaletteButtonCell`）で、入れ替えを止めている。
     var isOn: Bool {
         get { state == .on }
         set { state = newValue ? .on : .off }
@@ -216,6 +218,11 @@ class PaletteButton: NSButton {
 
     override var state: NSControl.StateValue {
         didSet { if oldValue != state { refresh() } }
+    }
+
+    override class var cellClass: AnyClass? {
+        get { PaletteButtonCell.self }
+        set {}
     }
 
     init(symbol: String?, label: String, role: Role = .button, pointSize: CGFloat = 15, showsTitle: Bool = false, size: NSSize = NSSize(width: 30, height: 30)) {
@@ -237,7 +244,7 @@ class PaletteButton: NSButton {
         toolTip = label
         setLabel(label)
         imagePosition = showsTitle ? .imageLeading : .imageOnly   // 枠と文字の設定のあとに決める（絵だけのボタンに、文字が出ないように）
-        imageHugsTitle = true
+        (cell as? PaletteButtonCell)?.keepsState = role == .button
         refresh()
     }
 
@@ -292,28 +299,49 @@ class PaletteButton: NSButton {
                 layer?.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.18).cgColor
                 contentTintColor = .controlAccentColor
             } else {
-                layer?.backgroundColor = hovering ? NSColor.labelColor.withAlphaComponent(0.08).cgColor : NSColor.clear.cgColor
+                layer?.backgroundColor = pressing ? NSColor.labelColor.withAlphaComponent(0.16).cgColor
+                    : hovering ? NSColor.labelColor.withAlphaComponent(0.08).cgColor : NSColor.clear.cgColor
                 contentTintColor = NSColor.labelColor.withAlphaComponent(0.82)
             }
         }
         refreshTitle()
     }
 
-    /// 見える文字は、アクセントの選びのときも、ふつうの文字の色にそろえる（`contentTintColor` は、文字には効かないことがある）。
+    /// 文字つきのボタンの、文字と絵は、標準のセルに任せず、描くときに、いまの外観で、自分で描く（標準のセルは、状態によって、文字の色を替え、
+    /// 作ったときの外観で色が決まることがある。ダークの外観で、暗い文字が出ないように、色は、描く時点で決める）。
     private func refreshTitle() {
         guard showsTitle else { return }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: 12),
-            .foregroundColor: NSColor.labelColor.withAlphaComponent(isOn ? 1 : 0.82),
-            .paragraphStyle: paragraph,
-        ])
+        needsDisplay = true
+    }
+
+    private func drawTitled() {
+        let textColor = NSColor.labelColor.withAlphaComponent(isOn ? 1 : 0.82)
+        let tint = isOn ? NSColor.controlAccentColor : NSColor.labelColor.withAlphaComponent(0.82)
+        let text = NSAttributedString(string: title, attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: textColor])
+        let textSize = text.size()
+        var symbol: NSImage?
+        if let image {
+            let color = NSColor(cgColor: tint.cgColor) ?? tint   // 描いている時点の外観で、色を決める
+            symbol = NSImage(size: image.size, flipped: false) { rect in
+                image.draw(in: rect)
+                color.set()
+                rect.fill(using: .sourceAtop)
+                return true
+            }
+        }
+        let gap: CGFloat = symbol == nil ? 0 : 5
+        let symbolWidth = symbol?.size.width ?? 0
+        var x = (bounds.midX - (symbolWidth + gap + textSize.width) / 2).rounded()
+        if let symbol {
+            symbol.draw(in: NSRect(x: x, y: (bounds.midY - symbol.size.height / 2).rounded(), width: symbol.size.width, height: symbol.size.height))
+            x += symbolWidth + gap
+        }
+        text.draw(at: NSPoint(x: x, y: (bounds.midY - textSize.height / 2).rounded()))
     }
 
     /// メニューのあるボタンの、右下の小さな目印。
     override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
+        if showsTitle { drawTitled() } else { super.draw(dirtyRect) }
         guard menuProvider != nil else { return }
         let tip = NSBezierPath()
         let x = bounds.maxX - 6, y = bounds.minY + 5
@@ -329,7 +357,13 @@ class PaletteButton: NSButton {
 
     override func mouseDown(with event: NSEvent) {
         guard isEnabled else { return }
-        guard menuProvider != nil, let window else {
+        guard menuProvider != nil else {
+            // ふつうの操作ボタン（パスをコピー・クリアなど）は、自分で、離すまで追跡する。押している間は、控えめな面（`pressing`）だけにする
+            // （標準の追跡のあとに、選びのアクセントの面が残る不具合は、セル〔`PaletteButtonCell`〕で防ぐ。ここは、押している間の見た目のため）。
+            if role == .button, let window { trackPress(in: window) } else { super.mouseDown(with: event) }
+            return
+        }
+        guard let window else {
             super.mouseDown(with: event)
             return
         }
@@ -340,6 +374,19 @@ class PaletteButton: NSButton {
         } else {
             showMenu()
         }
+    }
+
+    /// 離すまで追跡し、ボタンの上で離したときだけ、操作を送る。離すまで、押している面（`pressing`）を出す。
+    private func trackPress(in window: NSWindow) {
+        pressing = true
+        var inside = true
+        while let event = window.nextEvent(matching: [.leftMouseUp, .leftMouseDragged], until: .distantFuture, inMode: .eventTracking, dequeue: true) {
+            inside = bounds.contains(convert(event.locationInWindow, from: nil))
+            pressing = inside
+            if event.type == .leftMouseUp { break }
+        }
+        pressing = false
+        if inside { sendAction(action, to: target) }
     }
 
     /// メニューを、ボタンの下に開く。押している間にここへ来たときは、そのまま、離した所のマスを選べる。
@@ -451,4 +498,13 @@ final class DropHintView: NSView {
             layer?.borderColor = NSColor.controlAccentColor.withAlphaComponent(0.8).cgColor
         }
     }
+}
+
+/// `PaletteButton` のセル。標準の（瞬間の）ボタンは、押す・アクセシビリティの「押す」のたびに、`state` を、セルが直接、入れ替える（`state` の `didSet` も通らない）。
+/// ふつうの操作ボタン（パスをコピー・クリアなど）は、押しても「選び」にならないので、次の状態を、いまの状態のままにする
+/// （入れ替わると、押したあと、選びのアクセントの面が残る）。選びは、`isOn` で、明示的に決める（ツール・メニューの印）。
+final class PaletteButtonCell: NSButtonCell {
+    var keepsState = false
+
+    override var nextState: Int { keepsState ? state.rawValue : super.nextState }
 }
